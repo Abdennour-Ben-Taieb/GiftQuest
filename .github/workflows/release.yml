@@ -54,7 +54,16 @@ jobs:
 
       - name: Decode keystore
         run: |
-            echo "${{ secrets.KEYSTORE_BASE64 }}" | tr -d '[:space:]' | base64 -d > app/giftquest-release.jks
+            python3 -c "
+            import base64, os
+            data = os.environ['KEYSTORE_BASE64']
+            decoded = base64.b64decode(data)
+            with open('app/giftquest-release.jks', 'wb') as f:
+                f.write(decoded)
+            print(f'Keystore written: {len(decoded)} bytes')
+            "
+          env:
+            KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
 
       - name: Make gradlew executable
         run: chmod +x ./gradlew
