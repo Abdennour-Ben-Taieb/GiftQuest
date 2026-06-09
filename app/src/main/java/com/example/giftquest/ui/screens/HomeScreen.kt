@@ -29,6 +29,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import com.example.giftquest.Routes
+import com.example.giftquest.data.model.GameResult
 import com.example.giftquest.data.model.Item
 import com.example.giftquest.ui.home.HomeViewModel
 import com.google.firebase.auth.FirebaseAuth
@@ -53,6 +54,7 @@ fun HomeScreen(
     val partnerItems: List<Item> by vm.partnerItems.collectAsState()
     val partnerUid: String? by vm.partnerUid.collectAsState()
     val showTutorial by vm.showTutorial.collectAsState()
+    val gameResults by vm.gameResults.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
     val uiMessage by vm.message.collectAsState()
@@ -107,6 +109,12 @@ fun HomeScreen(
             partnerNickname = "Partner"
             partnerPhotoUrl = null
         }
+    }
+
+    // ── Notify ViewModel when tab changes (via swipe or click) ───────────────
+    LaunchedEffect(pagerState.currentPage) {
+        if (pagerState.currentPage == 1) vm.onPartnerTabOpened()
+        else vm.onPartnerTabClosed()
     }
 
     ModalNavigationDrawer(
@@ -297,12 +305,18 @@ fun HomeScreen(
                     TabRow(selectedTabIndex = pagerState.currentPage) {
                         Tab(
                             selected = pagerState.currentPage == 0,
-                            onClick = { scope.launch { pagerState.animateScrollToPage(0) } },
+                            onClick = {
+                                scope.launch { pagerState.animateScrollToPage(0) }
+                                vm.onPartnerTabClosed()
+                            },
                             text = { Text("My Items") }
                         )
                         Tab(
                             selected = pagerState.currentPage == 1,
-                            onClick = { scope.launch { pagerState.animateScrollToPage(1) } },
+                            onClick = {
+                                scope.launch { pagerState.animateScrollToPage(1) }
+                                vm.onPartnerTabOpened()
+                            },
                             text = {
                                 Text(
                                     if (isLinked) "$partnerNickname's Items"
@@ -335,6 +349,10 @@ fun HomeScreen(
                                     PartnerItemsPage(
                                         items = partnerItems,
                                         partnerNickname = partnerNickname,
+                                        gameResults = gameResults,
+                                        onLoadResult = { itemId ->
+                                            vm.loadGameResultForItem(itemId)
+                                        },
                                         onGuess = { itemId ->
                                             onOpenGuessChat(partnerUid ?: "", itemId)
                                         }
@@ -529,26 +547,10 @@ private fun MyItemsPage(
 private fun PartnerItemsPage(
     items: List<Item>,
     partnerNickname: String,
+    gameResults: Map<String, GameResult?>,
+    onLoadResult: (String) -> Unit,
     onGuess: (String) -> Unit
 ) {
-    val app = LocalContext.current.applicationContext as Application
-    val vm: HomeViewModel = viewModel(factory = HomeViewModel.factory(app))
-    val partnerUid by vm.partnerUid.collectAsState()
-    val currentUid = FirebaseAuth.getInstance().currentUser?.uid ?: ""
-
-    val gameResults by produceState(
-        initialValue = emptyMap<String, com.example.giftquest.data.model.GameResult>(),
-        key1 = partnerUid
-    ) {
-        if (partnerUid != null) {
-            com.example.giftquest.data.GameResultsRepository()
-                .gameResultsFlow(currentUid, partnerUid!!)
-                .collect { results ->
-                    value = results.associateBy { it.itemId }
-                }
-        }
-    }
-
     Column(
         Modifier
             .fillMaxSize()
@@ -570,6 +572,12 @@ private fun PartnerItemsPage(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 itemsIndexed(items, key = { _, item -> item.remoteId }) { _, item ->
+
+                    // Load this item's game result when it enters the visible list
+                    LaunchedEffect(item.remoteId) {
+                        onLoadResult(item.remoteId)
+                    }
+
                     val result = gameResults[item.remoteId]
                     AnonymizedGiftCard(
                         itemId = item.remoteId,

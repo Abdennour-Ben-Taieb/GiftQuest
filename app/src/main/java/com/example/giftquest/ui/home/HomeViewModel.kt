@@ -9,6 +9,7 @@ import com.example.giftquest.data.GameResultsRepository
 import com.example.giftquest.data.ItemsRepository
 import com.example.giftquest.data.NotificationService
 import com.example.giftquest.data.model.Item
+import com.example.giftquest.data.model.GameResult
 import com.example.giftquest.data.remote.PairingRepository
 import com.example.giftquest.data.user.UserDoc
 import com.example.giftquest.data.user.UserDocRepository
@@ -21,25 +22,22 @@ import kotlinx.coroutines.tasks.await
 
 private const val TAG = "GiftQuest"
 
-// Application-level scope — never cancelled by navigation or ViewModel destruction
 private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
 class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
-    private val itemsRepo = ItemsRepository()
-    private val pairingRepo = PairingRepository()
-    private val userRepo = UserDocRepository()
+    private val itemsRepo      = ItemsRepository()
+    private val pairingRepo    = PairingRepository()
+    private val userRepo       = UserDocRepository()
     private val gameResultsRepo = GameResultsRepository()
-    private val fs = FirebaseFirestore.getInstance()
-
-    private val auth = FirebaseAuth.getInstance()
+    private val fs             = FirebaseFirestore.getInstance()
+    private val auth           = FirebaseAuth.getInstance()
     private val uid: String get() = auth.currentUser?.uid ?: "anon"
 
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message
 
-    private fun prefs(app: Application) =
-        app.getSharedPreferences("gq_prefs", Context.MODE_PRIVATE)
+    // ── Tutorial ───────────────────────────────────────────────────────────────
 
     val showTutorial = MutableStateFlow(
         !getApplication<Application>()
@@ -50,33 +48,71 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     fun markTutorialDone() {
         getApplication<Application>()
             .getSharedPreferences("gq_prefs", Context.MODE_PRIVATE)
-            .edit()
-            .putBoolean("tutorial_shown", true)
-            .apply()
+            .edit().putBoolean("tutorial_shown", true).apply()
         showTutorial.value = false
     }
 
+    // ── User & partner ─────────────────────────────────────────────────────────
+
     val userProfile: StateFlow<UserDoc?> = userRepo.meFlow()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
-
-    val myItems: StateFlow<List<Item>> = itemsRepo.itemsFlow(uid)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val partnerUid: StateFlow<String?> = userProfile
         .map { it?.linkedWith }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    val partnerItems: StateFlow<List<Item>> = userRepo.meFlow()
-        .flatMapLatest { me ->
-            val partnerUid = me?.linkedWith
-            if (partnerUid == null) flowOf(emptyList())
-            else itemsRepo.itemsFlow(partnerUid)
-        }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
     val isLinked: StateFlow<Boolean> = userProfile
         .map { it?.linkedWith != null }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    // ── My items — loads immediately (user is always on this tab first) ────────
+
+    val myItems: StateFlow<List<Item>> = itemsRepo.itemsFlow(uid)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    // ── Partner items — only loads when partner tab is opened ──────────────────
+
+    private val _partnerTabActive = MutableStateFlow(false)
+
+    fun onPartnerTabOpened() { _partnerTabActive.value = true }
+    fun onPartnerTabClosed() { _partnerTabActive.value = false }
+
+    val partnerItems: StateFlow<List<Item>> = _partnerTabActive
+        .flatMapLatest { active ->
+            if (!active) flowOf(emptyList())
+            else userProfile.flatMapLatest { me ->
+                val pUid = me?.linkedWith
+                if (pUid == null) flowOf(emptyList())
+                else itemsRepo.itemsFlow(pUid)
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    // ── Game results — loaded on demand per item, not upfront ─────────────────
+
+    // Cache so we don't re-fetch the same item twice
+    private val _gameResults = MutableStateFlow<Map<String, GameResult?>>(emptyMap())
+    val gameResults: StateFlow<Map<String, GameResult?>> = _gameResults
+
+    fun loadGameResultForItem(itemId: String) {
+        val currentUid = uid
+        val pUid = partnerUid.value ?: return
+        if (_gameResults.value.containsKey(itemId)) return // already loaded
+
+        viewModelScope.launch {
+            try {
+                gameResultsRepo.gameResultsFlow(currentUid, pUid)
+                    .map { list -> list.find { it.itemId == itemId } }
+                    .collect { result ->
+                        _gameResults.value = _gameResults.value + (itemId to result)
+                    }
+            } catch (e: Exception) {
+                Log.w(TAG, "loadGameResultForItem failed: ${e.message}")
+            }
+        }
+    }
+
+    // ── Init ───────────────────────────────────────────────────────────────────
 
     init {
         viewModelScope.launch {
@@ -92,11 +128,8 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     // ── Item operations ────────────────────────────────────────────────────────
 
     fun addItem(
-        title: String,
-        category: String = "",
-        price: Double = 0.0,
-        link: String = "",
-        note: String = ""
+        title: String, category: String = "", price: Double = 0.0,
+        link: String = "", note: String = ""
     ) {
         if (title.isBlank()) { _message.value = "Title cannot be empty"; return }
         val currentUid = uid
@@ -106,8 +139,6 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                     title = title, category = category, price = price,
                     link = link, note = note, userId = currentUid
                 )
-
-                // Notify partner that a new gift was added to the wishlist
                 val myDoc = fs.collection("users").document(currentUid).get().await()
                 val partner = myDoc.getString("linkedWith")
                 if (!partner.isNullOrBlank()) {
@@ -116,7 +147,6 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
                         title = "New gift on the wishlist 🎁",
                         message = "Your partner just added a new gift — go take a guess!"
                     )
-                    Log.d(TAG, "Partner notified of new item")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "addItem failed: ${e.message}", e)
@@ -125,55 +155,34 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun updateItem(
-        remoteId: String,
-        title: String,
-        category: String = "",
-        price: Double = 0.0,
-        link: String = "",
-        note: String = ""
+        remoteId: String, title: String, category: String = "",
+        price: Double = 0.0, link: String = "", note: String = ""
     ) {
         val currentUid = uid
         applicationScope.launch {
             try {
-                Log.d(TAG, "=== updateItem called === remoteId=$remoteId uid=$currentUid")
-
                 itemsRepo.updateItem(
                     remoteId = remoteId, userId = currentUid,
                     title = title, category = category,
                     price = price, link = link, note = note
                 )
-                Log.d(TAG, "Item updated: $remoteId")
-
                 val myDoc = fs.collection("users").document(currentUid).get().await()
                 val partner = myDoc.getString("linkedWith")
-                Log.d(TAG, "Partner UID from Firestore: $partner")
-
-                if (partner.isNullOrBlank()) {
-                    Log.d(TAG, "Not linked — skipping notification check")
-                    return@launch
-                }
+                if (partner.isNullOrBlank()) return@launch
 
                 val existingResult = gameResultsRepo.getResultForItem(
-                    guesserUid = partner,
-                    itemId = remoteId
+                    guesserUid = partner, itemId = remoteId
                 )
-                Log.d(TAG, "Existing game result for item $remoteId: ${existingResult != null}")
-
                 if (existingResult != null) {
                     gameResultsRepo.deleteResultForItem(
-                        guesserUid = partner,
-                        itemId = remoteId
+                        guesserUid = partner, itemId = remoteId
                     )
-                    Log.d(TAG, "Game result deleted for partner=$partner, item=$remoteId")
-
                     NotificationService.sendNotificationToUser(
                         targetUid = partner,
                         title = "Gift updated 🎁",
-                        message = "Your partner edited a gift you already guessed. Try to guess it again!"
+                        message = "Your partner edited a gift you already guessed. Try again!"
                     )
-                    Log.d(TAG, "Notification sent to partner=$partner")
                 }
-
             } catch (e: Exception) {
                 Log.e(TAG, "updateItem failed: ${e.message}", e)
             }
