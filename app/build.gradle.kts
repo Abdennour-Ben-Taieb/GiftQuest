@@ -46,6 +46,15 @@ android {
             .forEach { it.outputFileName = "GiftQuest-v$currentVersionName.apk" }
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile     = file("giftquest-release.jks")
+            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
+            keyAlias      = System.getenv("KEY_ALIAS") ?: "giftquest"
+            keyPassword   = System.getenv("KEYSTORE_PASSWORD") ?: ""
+        }
+    }
+
 
     buildTypes {
         release {
