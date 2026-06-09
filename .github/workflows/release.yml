@@ -35,8 +35,10 @@ jobs:
       - name: Read version
         id: ver
         run: |
-          VERSION=$(cat version.txt | tr -d '[:space:]')
-          echo "current=$VERSION" >> $GITHUB_OUTPUT
+          VERSION_CODE=$(sed -n '1p' version.txt | tr -d '[:space:]')
+          VERSION_NAME=$(sed -n '2p' version.txt | tr -d '[:space:]')
+          echo "code=$VERSION_CODE" >> $GITHUB_OUTPUT
+          echo "name=$VERSION_NAME" >> $GITHUB_OUTPUT
 
       - name: Create local.properties
         run: |
@@ -76,7 +78,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2.3.2
         with:
-          tag_name: v${{ steps.ver.outputs.current }}
-          name: "GiftQuest v${{ steps.ver.outputs.current }}"
+          tag_name: v${{ steps.ver.outputs.name }}
+          name: "GiftQuest v${{ steps.ver.outputs.name }}"
           files: ${{ steps.apk.outputs.path }}
           generate_release_notes: true

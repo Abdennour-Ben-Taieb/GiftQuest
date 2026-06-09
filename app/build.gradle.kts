@@ -5,6 +5,15 @@ plugins {
     id("com.google.gms.google-services")
 }
 
+// ── Auto-increment version ─────────────────────────────────────────────────
+// Defined at top level so they're accessible everywhere in this file
+val versionFile = rootProject.file("version.txt")
+val versionLines = if (versionFile.exists()) versionFile.readLines() else listOf("1", "1.0.1")
+val currentVersionCode = versionLines[0].trim().toInt()
+val currentVersionName = if (versionLines.size > 1) versionLines[1].trim() else "1.0.$currentVersionCode"
+
+// ──────────────────────────────────────────────────────────────────────────
+
 android {
     namespace = "com.example.giftquest"
     compileSdk = 35
@@ -12,9 +21,9 @@ android {
     defaultConfig {
         applicationId = "com.example.giftquest"
         minSdk = 26
-        targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        targetSdk = 35
+        versionCode = currentVersionCode
+        versionName = currentVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -24,11 +33,19 @@ android {
             if (file.exists()) file.inputStream().use { load(it) }
         }
 
-        buildConfigField("String", "GROQ_API_KEY",        "\"${localProperties["GROQ_API_KEY"] ?: ""}\"")
-        buildConfigField("String", "WEB_CLIENT_ID",       "\"${localProperties["WEB_CLIENT_ID"] ?: ""}\"")
-        buildConfigField("String", "CLOUDINARY_CLOUD",    "\"${localProperties["CLOUDINARY_CLOUD"] ?: ""}\"")
-        buildConfigField("String", "CLOUDINARY_PRESET",   "\"${localProperties["CLOUDINARY_PRESET"] ?: ""}\"")
+        buildConfigField("String", "GROQ_API_KEY",      "\"${localProperties["GROQ_API_KEY"] ?: ""}\"")
+        buildConfigField("String", "WEB_CLIENT_ID",     "\"${localProperties["WEB_CLIENT_ID"] ?: ""}\"")
+        buildConfigField("String", "CLOUDINARY_CLOUD",  "\"${localProperties["CLOUDINARY_CLOUD"] ?: ""}\"")
+        buildConfigField("String", "CLOUDINARY_PRESET", "\"${localProperties["CLOUDINARY_PRESET"] ?: ""}\"")
     }
+
+    // Custom APK name: GiftQuest-v5.apk
+    applicationVariants.all {
+        outputs
+            .map { it as com.android.build.gradle.internal.api.BaseVariantOutputImpl }
+            .forEach { it.outputFileName = "GiftQuest-v$currentVersionName.apk" }
+    }
+
 
     buildTypes {
         release {
@@ -120,4 +137,18 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.ui.test.junit4)
+}
+
+// ── Auto-increment versionCode after every successful APK build ────────────
+tasks.whenTaskAdded {
+    if (name == "assembleDebug" || name == "assembleRelease") {
+        doLast {
+            val nextCode = currentVersionCode + 1
+            // Patch number follows versionCode automatically
+            val parts = currentVersionName.split(".")
+            val nextName = "${parts[0]}.${parts[1]}.$nextCode"
+            versionFile.writeText("$nextCode\n$nextName")
+            println("✓ Version bumped: $currentVersionCode ($currentVersionName) → $nextCode ($nextName)")
+        }
+    }
 }
