@@ -72,21 +72,44 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     // ── Partner items — only loads when partner tab is opened ──────────────────
 
-    private val _partnerTabActive = MutableStateFlow(false)
+    private val _partnerTabVisible = MutableStateFlow(false)
 
-    fun onPartnerTabOpened() { _partnerTabActive.value = true }
-    fun onPartnerTabClosed() { _partnerTabActive.value = false }
+    fun onPartnerTabOpened() { _partnerTabVisible.value = true }
+    fun onPartnerTabClosed() { _partnerTabVisible.value = false }
 
-    val partnerItems: StateFlow<List<Item>> = _partnerTabActive
-        .flatMapLatest { active ->
-            if (!active) flowOf(emptyList())
-            else userProfile.flatMapLatest { me ->
-                val pUid = me?.linkedWith
-                if (pUid == null) flowOf(emptyList())
-                else itemsRepo.itemsFlow(pUid)
-            }
+    // Warm cache: fetch silently as soon as linked
+    private val _partnerItemsCache = MutableStateFlow<List<Item>>(emptyList())
+
+    val partnerItems: StateFlow<List<Item>> = _partnerTabVisible
+        .flatMapLatest { visible ->
+            if (visible) _partnerItemsCache
+            else flowOf(emptyList())
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    init {
+        // Warm the partner items cache silently in background
+        viewModelScope.launch {
+            partnerUid.collectLatest { pUid ->
+                if (pUid != null) {
+                    itemsRepo.itemsFlow(pUid).collect { items ->
+                        _partnerItemsCache.value = items
+                    }
+                } else {
+                    _partnerItemsCache.value = emptyList()
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            try {
+                val token = FirebaseMessaging.getInstance().token.await()
+                NotificationService.saveFcmToken(token)
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not get FCM token: ${e.message}")
+            }
+        }
+    }
 
     // ── Game results — loaded on demand per item, not upfront ─────────────────
 

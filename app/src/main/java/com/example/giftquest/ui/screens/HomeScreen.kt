@@ -25,6 +25,13 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.pager.PagerDefaults
+import androidx.compose.foundation.pager.PagerSnapDistance
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
@@ -112,9 +119,11 @@ fun HomeScreen(
     }
 
     // ── Notify ViewModel when tab changes (via swipe or click) ───────────────
-    LaunchedEffect(pagerState.currentPage) {
-        if (pagerState.currentPage == 1) vm.onPartnerTabOpened()
-        else vm.onPartnerTabClosed()
+    LaunchedEffect(pagerState.isScrollInProgress, pagerState.currentPage) {
+        if (!pagerState.isScrollInProgress) {
+            if (pagerState.currentPage == 1) vm.onPartnerTabOpened()
+            else vm.onPartnerTabClosed()
+        }
     }
 
     ModalNavigationDrawer(
@@ -328,7 +337,25 @@ fun HomeScreen(
 
                     HorizontalPager(
                         state = pagerState,
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier.fillMaxSize(),
+                        beyondBoundsPageCount = 0,
+                        pageNestedScrollConnection = PagerDefaults.pageNestedScrollConnection(
+                            state = pagerState,
+                            orientation = Orientation.Horizontal
+                        ),
+                        flingBehavior = PagerDefaults.flingBehavior(
+                            state = pagerState,
+                            pagerSnapDistance = PagerSnapDistance.atMost(1),
+                            snapAnimationSpec = spring(
+                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                stiffness = Spring.StiffnessMediumLow
+                            ),
+                            lowVelocityAnimationSpec = tween(
+                                durationMillis = 900,
+                                easing = FastOutSlowInEasing
+                            ),
+                            snapPositionalThreshold = 0.3f
+                        )
                     ) { page ->
                         when (page) {
                             0 -> MyItemsPage(

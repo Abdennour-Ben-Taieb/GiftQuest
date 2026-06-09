@@ -155,12 +155,14 @@ dependencies {
 tasks.whenTaskAdded {
     if (name == "assembleDebug" || name == "assembleRelease") {
         doLast {
-            val nextCode = currentVersionCode + 1
-            // Patch number follows versionCode automatically
-            val parts = currentVersionName.split(".")
-            val nextName = "${parts[0]}.${parts[1]}.$nextCode"
-            versionFile.writeText("$nextCode\n$nextName")
-            println("✓ Version bumped: $currentVersionCode ($currentVersionName) → $nextCode ($nextName)")
+            // Only bump version on CI, never locally
+            if (System.getenv("CI") == "true") {
+                val nextCode = currentVersionCode + 1
+                val parts = currentVersionName.split(".")
+                val nextName = "${parts[0]}.${parts[1]}.$nextCode"
+                versionFile.writeText("$nextCode\n$nextName")
+                println("✓ Bumped: $currentVersionCode ($currentVersionName) → $nextCode ($nextName)")
+            }
         }
     }
 }

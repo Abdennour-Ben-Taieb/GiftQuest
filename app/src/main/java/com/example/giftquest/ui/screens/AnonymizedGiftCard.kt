@@ -3,6 +3,7 @@ package com.example.giftquest.ui.screens
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -18,7 +19,7 @@ fun AnonymizedGiftCard(
     onClick: () -> Unit
 ) {
     if (isGuessed && revealedTitle != null) {
-        // ── Revealed card ──────────────────────────────────────────────────────
+        // ── Revealed card ─────────────────────────────────────────────────────
         ElevatedCard(
             onClick = onClick,
             modifier = Modifier.fillMaxWidth(),
@@ -26,7 +27,11 @@ fun AnonymizedGiftCard(
                 containerColor = MaterialTheme.colorScheme.primaryContainer
             )
         ) {
-            Column(modifier = Modifier.padding(16.dp).fillMaxWidth()) {
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .fillMaxWidth()
+            ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -60,14 +65,21 @@ fun AnonymizedGiftCard(
             }
         }
     } else {
-        // ── Mystery card — NO category shown ──────────────────────────────────
+        // ── Mystery card ──────────────────────────────────────────────────────
+        // remember so GiftSplashTexts.getFor() doesn't recompute on recomposition
+        val splashText = remember(itemId) { GiftSplashTexts.getFor(itemId) }
+
         ElevatedCard(
             onClick = onClick,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(modifier = Modifier.padding(16.dp).fillMaxWidth()) {
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .fillMaxWidth()
+            ) {
                 Text(
-                    text = GiftSplashTexts.getFor(itemId),
+                    text = splashText,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface
                 )

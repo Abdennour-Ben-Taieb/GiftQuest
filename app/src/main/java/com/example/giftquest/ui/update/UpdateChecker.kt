@@ -18,26 +18,34 @@ private const val TAG = "GiftQuest"
 fun UpdateChecker(currentVersion: Int) {
     val context = LocalContext.current
     var config by remember { mutableStateOf<AppConfig?>(null) }
+
+    // Persist dismissal — user only sees dialog once per version
+    val prefs = remember { context.getSharedPreferences("gq_prefs", Context.MODE_PRIVATE) }
+    val dismissedVersion = remember { prefs.getInt("update_dismissed_version", -1) }
     var dismissed by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         RemoteConfigRepository().appConfigFlow()
-            .catch { Log.w(TAG, "UpdateChecker flow error: $it") }
+            .catch { Log.w("GiftQuest", "UpdateChecker flow error: $it") }
             .collect { config = it }
     }
 
     val cfg = config ?: return
     if (cfg.latestVersion <= currentVersion) return
     if (dismissed) return
+    if (dismissedVersion >= cfg.latestVersion) return // already dismissed this version
     if (cfg.downloadUrl.isBlank()) return
 
     AlertDialog(
-        onDismissRequest = { dismissed = true },
+        onDismissRequest = {
+            dismissed = true
+            prefs.edit().putInt("update_dismissed_version", cfg.latestVersion).apply()
+        },
         title = { Text("Update Available 🎁") },
-        text  = {
+        text = {
             Text(
                 "Version ${cfg.latestVersionName} is ready.\n\n" +
-                        (if (cfg.releaseNotes.isNotBlank()) cfg.releaseNotes else "Tap below to download.")
+                        if (cfg.releaseNotes.isNotBlank()) cfg.releaseNotes else "Tap below to download."
             )
         },
         confirmButton = {
@@ -45,10 +53,15 @@ fun UpdateChecker(currentVersion: Int) {
                 context.startActivity(
                     Intent(Intent.ACTION_VIEW, Uri.parse(cfg.downloadUrl))
                 )
+                dismissed = true
+                prefs.edit().putInt("update_dismissed_version", cfg.latestVersion).apply()
             }) { Text("Update Now") }
         },
         dismissButton = {
-            TextButton(onClick = { dismissed = true }) { Text("Later") }
+            TextButton(onClick = {
+                dismissed = true
+                prefs.edit().putInt("update_dismissed_version", cfg.latestVersion).apply()
+            }) { Text("Later") }
         }
     )
 }
