@@ -7,25 +7,24 @@ on:
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
-      # 1. Check out the full git history (needed to push back the version bump)
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
-      # 2. Set up Java 17
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v4.7.0
         with:
           java-version: '17'
           distribution: 'temurin'
 
-      # 3. Cache Gradle — makes builds ~3x faster after the first run
       - name: Cache Gradle
-        uses: actions/cache@v4
+        uses: actions/cache@v4.2.3
         with:
           path: |
             ~/.gradle/caches
@@ -33,15 +32,12 @@ jobs:
           key: gradle-${{ hashFiles('**/*.gradle.kts', '**/gradle-wrapper.properties') }}
           restore-keys: gradle-
 
-      # 4. Read version from version.txt
       - name: Read version
         id: ver
         run: |
           VERSION=$(cat version.txt | tr -d '[:space:]')
           echo "current=$VERSION" >> $GITHUB_OUTPUT
-          echo "Current version: $VERSION"
 
-      # 5. Reconstruct local.properties from GitHub Secrets
       - name: Create local.properties
         run: |
           echo "sdk.dir=/usr/local/lib/android/sdk" > local.properties
@@ -50,30 +46,24 @@ jobs:
           echo "CLOUDINARY_PRESET=${{ secrets.CLOUDINARY_PRESET }}" >> local.properties
           echo "WEB_CLIENT_ID=${{ secrets.WEB_CLIENT_ID }}" >> local.properties
 
-      # 6. Decode google-services.json from secret
       - name: Decode google-services.json
         run: |
           echo "${{ secrets.GOOGLE_SERVICES_JSON }}" | base64 -d > app/google-services.json
 
-      # 7. Make gradlew executable (Linux requires this)
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
-      # 8. Build the debug APK
       - name: Build APK
         run: ./gradlew assembleDebug
 
-      # 9. Find the APK (version.txt auto-increments on build, find what was produced)
       - name: Find APK
         id: apk
         run: |
           APK_PATH=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
-          APK_NAME=$(basename $APK_PATH)
+          APK_NAME=$(basename "$APK_PATH")
           echo "path=$APK_PATH" >> $GITHUB_OUTPUT
           echo "name=$APK_NAME" >> $GITHUB_OUTPUT
-          echo "Found: $APK_NAME"
 
-      # 10. Commit the updated version.txt back to main
       - name: Commit version bump
         run: |
           NEW_VERSION=$(cat version.txt | tr -d '[:space:]')
@@ -83,9 +73,8 @@ jobs:
           git diff --staged --quiet || git commit -m "chore: bump version to $NEW_VERSION [skip ci]"
           git push
 
-      # 11. Create GitHub Release and upload the APK
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2.3.2
         with:
           tag_name: v${{ steps.ver.outputs.current }}
           name: "GiftQuest v${{ steps.ver.outputs.current }}"
