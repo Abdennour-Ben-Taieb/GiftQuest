@@ -48,10 +48,13 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile     = file("giftquest-release.jks")
-            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
-            keyAlias      = System.getenv("KEY_ALIAS") ?: "giftquest"
-            keyPassword   = System.getenv("KEYSTORE_PASSWORD") ?: ""
+            val keystoreFile = file("giftquest-release.jks")
+            if (keystoreFile.exists()) {
+                storeFile     = keystoreFile
+                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "444444"
+                keyAlias      = System.getenv("KEY_ALIAS") ?: "giftquest"
+                keyPassword   = System.getenv("KEYSTORE_PASSWORD") ?: "444444"
+            }
         }
     }
 
