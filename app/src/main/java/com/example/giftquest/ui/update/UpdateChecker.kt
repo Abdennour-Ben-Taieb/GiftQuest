@@ -27,27 +27,30 @@ fun UpdateChecker(currentVersion: Int) {
     }
 
     val cfg = config ?: return
-    if (!dismissed && cfg.latestVersion > currentVersion && cfg.downloadUrl.isNotBlank()) {
-        AlertDialog(
-            onDismissRequest = { dismissed = true },
-            title = { Text("Update Available 🎁") },
-            text = {
-                Text(
-                    "A new version of GiftQuest is available (v${cfg.latestVersion}). " +
-                            "Update now for the latest features and fixes."
+    if (cfg.latestVersion <= currentVersion) return
+    if (dismissed) return
+    if (cfg.downloadUrl.isBlank()) return
+
+    AlertDialog(
+        onDismissRequest = { dismissed = true },
+        title = { Text("Update Available 🎁") },
+        text  = {
+            Text(
+                "Version ${cfg.latestVersionName} is ready.\n\n" +
+                        (if (cfg.releaseNotes.isNotBlank()) cfg.releaseNotes else "Tap below to download.")
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                context.startActivity(
+                    Intent(Intent.ACTION_VIEW, Uri.parse(cfg.downloadUrl))
                 )
-            },
-            confirmButton = {
-                Button(onClick = {
-                    openUrl(context, cfg.downloadUrl)
-                    dismissed = true
-                }) { Text("Update Now") }
-            },
-            dismissButton = {
-                TextButton(onClick = { dismissed = true }) { Text("Later") }
-            }
-        )
-    }
+            }) { Text("Update Now") }
+        },
+        dismissButton = {
+            TextButton(onClick = { dismissed = true }) { Text("Later") }
+        }
+    )
 }
 
 private fun openUrl(context: Context, url: String) {

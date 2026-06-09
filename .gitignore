@@ -11,6 +11,7 @@ local.properties
 google-services.json
 *.jks
 *.keystore
+giftquest-admin.html
 
 # IDE
 /.idea/caches

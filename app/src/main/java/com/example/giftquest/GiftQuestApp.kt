@@ -30,7 +30,7 @@ fun GiftQuestApp() {
         val start = if (isLoggedIn) Routes.HOME else Routes.LOGIN
 
         Surface(color = MaterialTheme.colorScheme.background) {
-            UpdateChecker(currentVersion = 1)
+            UpdateChecker(currentVersion = BuildConfig.VERSION_CODE)
             NavHost(navController = nav, startDestination = start) {
 
                 composable(Routes.LOGIN) {

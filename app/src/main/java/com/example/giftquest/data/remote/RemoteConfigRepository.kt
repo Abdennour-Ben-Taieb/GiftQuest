@@ -11,17 +11,16 @@ private const val TAG = "GiftQuest"
 
 data class AppConfig(
     val latestVersion: Int = 1,
+    val latestVersionName: String = "1.0.1",
     val downloadUrl: String = "",
-    val aiDifficulty: String = "medium",   // "easy" | "medium" | "hard"
+    val releaseNotes: String = "",        // ← add this too
+    val aiDifficulty: String = "medium",
     val aiSystemPrompt: String = DEFAULT_SYSTEM_PROMPT,
     val aiTemperature: Double = 0.7,
     val aiMaxTokens: Int = 500
 ) {
     companion object {
-        const val DEFAULT_SYSTEM_PROMPT = """You are a playful gift-guessing assistant. 
-The user is trying to guess what gift their partner wants. 
-Give hints based on the gift details you know, but never reveal the exact item name directly.
-Be encouraging and fun."""
+        const val DEFAULT_SYSTEM_PROMPT = ""
     }
 }
 
@@ -35,12 +34,14 @@ class RemoteConfigRepository(
         return try {
             val doc = configDoc.get().await()
             AppConfig(
-                latestVersion  = (doc.getLong("latestVersion") ?: 1).toInt(),
-                downloadUrl    = doc.getString("downloadUrl") ?: "",
-                aiDifficulty   = doc.getString("aiDifficulty") ?: "medium",
-                aiSystemPrompt = doc.getString("aiSystemPrompt") ?: AppConfig.DEFAULT_SYSTEM_PROMPT,
-                aiTemperature  = doc.getDouble("aiTemperature") ?: 0.7,
-                aiMaxTokens    = (doc.getLong("aiMaxTokens") ?: 500).toInt()
+                latestVersion     = (doc.getLong("latestVersion") ?: 1).toInt(),
+                latestVersionName = doc.getString("latestVersionName") ?: "1.0.1",  // ← add
+                downloadUrl       = doc.getString("downloadUrl") ?: "",
+                releaseNotes = doc.getString("releaseNotes") ?: "",
+                aiDifficulty      = doc.getString("aiDifficulty") ?: "medium",
+                aiSystemPrompt    = doc.getString("aiSystemPrompt") ?: AppConfig.DEFAULT_SYSTEM_PROMPT,
+                aiTemperature     = doc.getDouble("aiTemperature") ?: 0.7,
+                aiMaxTokens       = (doc.getLong("aiMaxTokens") ?: 500).toInt()
             )
         } catch (e: Exception) {
             Log.w(TAG, "Failed to fetch remote config, using defaults: ${e.message}")
@@ -58,12 +59,14 @@ class RemoteConfigRepository(
             }
             val config = snap?.let {
                 AppConfig(
-                    latestVersion  = (it.getLong("latestVersion") ?: 1).toInt(),
-                    downloadUrl    = it.getString("downloadUrl") ?: "",
-                    aiDifficulty   = it.getString("aiDifficulty") ?: "medium",
-                    aiSystemPrompt = it.getString("aiSystemPrompt") ?: AppConfig.DEFAULT_SYSTEM_PROMPT,
-                    aiTemperature  = it.getDouble("aiTemperature") ?: 0.7,
-                    aiMaxTokens    = (it.getLong("aiMaxTokens") ?: 500).toInt()
+                    latestVersion     = (it.getLong("latestVersion") ?: 1).toInt(),
+                    latestVersionName = it.getString("latestVersionName") ?: "1.0.1",  // ← add
+                    downloadUrl       = it.getString("downloadUrl") ?: "",
+                    releaseNotes = it.getString("releaseNotes") ?: "",
+                    aiDifficulty      = it.getString("aiDifficulty") ?: "medium",
+                    aiSystemPrompt    = it.getString("aiSystemPrompt") ?: AppConfig.DEFAULT_SYSTEM_PROMPT,
+                    aiTemperature     = it.getDouble("aiTemperature") ?: 0.7,
+                    aiMaxTokens       = (it.getLong("aiMaxTokens") ?: 500).toInt()
                 )
             } ?: AppConfig()
             trySend(config)

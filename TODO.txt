@@ -1,0 +1,5 @@
+build pw reset screen
+make qr work form native cam not just inapp cam
+change guessed notif to only happen when the user has more than one gift on their list
+add tutorials
+add food as gift category

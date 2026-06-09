@@ -2,6 +2,7 @@ package com.example.giftquest.ui.home
 
 import android.app.Application
 import android.util.Log
+import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.giftquest.data.GameResultsRepository
@@ -36,6 +37,24 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message
+
+    private fun prefs(app: Application) =
+        app.getSharedPreferences("gq_prefs", Context.MODE_PRIVATE)
+
+    val showTutorial = MutableStateFlow(
+        !getApplication<Application>()
+            .getSharedPreferences("gq_prefs", Context.MODE_PRIVATE)
+            .getBoolean("tutorial_shown", false)
+    )
+
+    fun markTutorialDone() {
+        getApplication<Application>()
+            .getSharedPreferences("gq_prefs", Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean("tutorial_shown", true)
+            .apply()
+        showTutorial.value = false
+    }
 
     val userProfile: StateFlow<UserDoc?> = userRepo.meFlow()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)

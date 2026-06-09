@@ -2,3 +2,5 @@
 /release
 *.apk
 *.aab
+local.properties
+giftquest-admin.html

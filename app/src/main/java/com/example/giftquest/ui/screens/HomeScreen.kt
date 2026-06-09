@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -51,6 +52,7 @@ fun HomeScreen(
     val myItems: List<Item> by vm.myItems.collectAsState()
     val partnerItems: List<Item> by vm.partnerItems.collectAsState()
     val partnerUid: String? by vm.partnerUid.collectAsState()
+    val showTutorial by vm.showTutorial.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
     val uiMessage by vm.message.collectAsState()
@@ -70,19 +72,40 @@ fun HomeScreen(
     val uid = authUser?.uid ?: "unknown"
     val isLinked = partnerUid != null
 
+    // ── My profile ────────────────────────────────────────────────────────────
     var userNickname by remember { mutableStateOf(authUser?.displayName ?: "You") }
     var userPhotoUrl by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(uid) {
         if (uid != "unknown") {
             try {
-                val userDoc = FirebaseFirestore.getInstance()
+                val doc = FirebaseFirestore.getInstance()
                     .collection("users").document(uid).get().await()
-                userNickname = userDoc.getString("nickname") ?: authUser?.displayName ?: "You"
-                userPhotoUrl = userDoc.getString("photoUrl")
+                userNickname = doc.getString("nickname") ?: authUser?.displayName ?: "You"
+                userPhotoUrl = doc.getString("photoUrl")
             } catch (e: Exception) {
                 android.util.Log.e("GiftQuest", "Failed to load user profile", e)
             }
+        }
+    }
+
+    // ── Partner profile ───────────────────────────────────────────────────────
+    var partnerNickname by remember { mutableStateOf("Partner") }
+    var partnerPhotoUrl by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(partnerUid) {
+        if (partnerUid != null) {
+            try {
+                val doc = FirebaseFirestore.getInstance()
+                    .collection("users").document(partnerUid!!).get().await()
+                partnerNickname = doc.getString("nickname")?.takeIf { it.isNotBlank() } ?: "Partner"
+                partnerPhotoUrl = doc.getString("photoUrl")
+            } catch (e: Exception) {
+                android.util.Log.e("GiftQuest", "Failed to load partner profile", e)
+            }
+        } else {
+            partnerNickname = "Partner"
+            partnerPhotoUrl = null
         }
     }
 
@@ -90,27 +113,52 @@ fun HomeScreen(
         drawerState = drawerState,
         drawerContent = {
             ModalDrawerSheet {
-                Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                ) {
+                    // ── My profile row ────────────────────────────────────────
                     Row(
-                        Modifier.fillMaxWidth().clickable {
-                            scope.launch { drawerState.close(); onOpenProfile() }
-                        },
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                scope.launch {
+                                    drawerState.close()
+                                    onOpenProfile()
+                                }
+                            },
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         if (!userPhotoUrl.isNullOrEmpty()) {
                             AsyncImage(
                                 model = userPhotoUrl,
                                 contentDescription = "Profile Photo",
-                                modifier = Modifier.size(56.dp).clip(CircleShape),
+                                modifier = Modifier
+                                    .size(56.dp)
+                                    .clip(CircleShape),
                                 contentScale = ContentScale.Crop
                             )
                         } else {
-                            Icon(Icons.Default.AccountCircle, contentDescription = "Profile", modifier = Modifier.size(56.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Icon(
+                                Icons.Default.AccountCircle,
+                                contentDescription = "Profile",
+                                modifier = Modifier.size(56.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                         Spacer(Modifier.width(12.dp))
                         Column {
-                            Text(userNickname, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                            Text("Tap to edit profile", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                userNickname,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                "Tap to edit profile",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
 
@@ -118,14 +166,71 @@ fun HomeScreen(
                     HorizontalDivider()
                     Spacer(Modifier.height(16.dp))
 
+                    // ── Partner profile row (only when linked) ────────────────
                     if (isLinked) {
-                        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
-                            Text("✓ Linked with Partner", modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer
+                            )
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (!partnerPhotoUrl.isNullOrEmpty()) {
+                                    AsyncImage(
+                                        model = partnerPhotoUrl,
+                                        contentDescription = "Partner Photo",
+                                        modifier = Modifier
+                                            .size(44.dp)
+                                            .clip(CircleShape),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Icon(
+                                        Icons.Default.AccountCircle,
+                                        contentDescription = "Partner",
+                                        modifier = Modifier.size(44.dp),
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                                Spacer(Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        partnerNickname,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                    Text(
+                                        "Your partner",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                                    )
+                                }
+                                Icon(
+                                    Icons.Default.Favorite,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                         Spacer(Modifier.height(8.dp))
                     }
 
-                    Button(onClick = { scope.launch { drawerState.close(); vm.unlinkPartner() } }, enabled = isLinked) {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                drawerState.close()
+                                vm.unlinkPartner()
+                            }
+                        },
+                        enabled = isLinked
+                    ) {
                         Text("Unlink Partner")
                     }
 
@@ -142,64 +247,119 @@ fun HomeScreen(
                                 FirebaseAuth.getInstance().signOut()
                             }
                         }
-                    ) { Text("Log out") }
+                    ) {
+                        Text("Log out")
+                    }
                 }
             }
         }
     ) {
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = { Text("GiftQuest") },
-                    actions = {
-                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            if (!userPhotoUrl.isNullOrEmpty()) {
-                                AsyncImage(model = userPhotoUrl, contentDescription = "Profile", modifier = Modifier.size(32.dp).clip(CircleShape), contentScale = ContentScale.Crop)
-                            } else {
-                                Icon(Icons.Default.AccountCircle, contentDescription = "Account menu")
+        // ── Outer Box: lets the tutorial overlay sit on top of everything ─────
+        Box(modifier = Modifier.fillMaxSize()) {
+
+            Scaffold(
+                topBar = {
+                    TopAppBar(
+                        title = { Text("GiftQuest") },
+                        actions = {
+                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                if (!userPhotoUrl.isNullOrEmpty()) {
+                                    AsyncImage(
+                                        model = userPhotoUrl,
+                                        contentDescription = "Profile",
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .clip(CircleShape),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Icon(
+                                        Icons.Default.AccountCircle,
+                                        contentDescription = "Account menu"
+                                    )
+                                }
                             }
                         }
+                    )
+                },
+                floatingActionButton = {
+                    FloatingActionButton(onClick = onAddItem) {
+                        Text("🎁", style = MaterialTheme.typography.headlineMedium)
                     }
-                )
-            },
-            floatingActionButton = {
-                FloatingActionButton(onClick = onAddItem) {
-                    Text("+", style = MaterialTheme.typography.headlineMedium)
-                }
-            },
-            snackbarHost = { SnackbarHost(snackbarHostState) }
-        ) { padding ->
-            Column(Modifier.padding(padding).fillMaxSize()) {
-                TabRow(selectedTabIndex = pagerState.currentPage) {
-                    Tab(selected = pagerState.currentPage == 0, onClick = { scope.launch { pagerState.animateScrollToPage(0) } }, text = { Text("My Items") })
-                    Tab(selected = pagerState.currentPage == 1, onClick = { scope.launch { pagerState.animateScrollToPage(1) } }, text = { Text("Partner's Items") })
-                }
-
-                HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
-                    when (page) {
-                        0 -> MyItemsPage(
-                            items = myItems,
-                            onEdit = { itemId -> onEditItem(itemId) },
-                            onDelete = { itemId -> vm.deleteItem(itemId) },
-                            onReorder = { newOrder -> vm.reorder(newOrder) },
-                            onGuess = { itemId -> onOpenGuessChat(uid, itemId) }
+                },
+                snackbarHost = { SnackbarHost(snackbarHostState) }
+            ) { padding ->
+                Column(
+                    Modifier
+                        .padding(padding)
+                        .fillMaxSize()
+                ) {
+                    TabRow(selectedTabIndex = pagerState.currentPage) {
+                        Tab(
+                            selected = pagerState.currentPage == 0,
+                            onClick = { scope.launch { pagerState.animateScrollToPage(0) } },
+                            text = { Text("My Items") }
                         )
-                        1 -> {
-                            if (!isLinked) {
-                                NotLinkedPage(onNavigateToLinkScreen = { navController.navigate(Routes.HER_ITEMS) })
-                            } else {
-                                PartnerItemsPage(
-                                    items = partnerItems,
-                                    onGuess = { itemId -> onOpenGuessChat(partnerUid ?: "", itemId) }
+                        Tab(
+                            selected = pagerState.currentPage == 1,
+                            onClick = { scope.launch { pagerState.animateScrollToPage(1) } },
+                            text = {
+                                Text(
+                                    if (isLinked) "$partnerNickname's Items"
+                                    else "Partner's Items"
                                 )
+                            }
+                        )
+                    }
+
+                    HorizontalPager(
+                        state = pagerState,
+                        modifier = Modifier.fillMaxSize()
+                    ) { page ->
+                        when (page) {
+                            0 -> MyItemsPage(
+                                items = myItems,
+                                onEdit = { itemId -> onEditItem(itemId) },
+                                onDelete = { itemId -> vm.deleteItem(itemId) },
+                                onReorder = { newOrder -> vm.reorder(newOrder) },
+                                onGuess = { itemId -> onOpenGuessChat(uid, itemId) }
+                            )
+                            1 -> {
+                                if (!isLinked) {
+                                    NotLinkedPage(
+                                        onNavigateToLinkScreen = {
+                                            navController.navigate(Routes.HER_ITEMS)
+                                        }
+                                    )
+                                } else {
+                                    PartnerItemsPage(
+                                        items = partnerItems,
+                                        partnerNickname = partnerNickname,
+                                        onGuess = { itemId ->
+                                            onOpenGuessChat(partnerUid ?: "", itemId)
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
-        }
-    }
+
+            // ── Tutorial overlay: on top of Scaffold, covers full screen ──────
+            if (showTutorial) {
+                TutorialOverlay(
+                    onFinish = { vm.markTutorialDone() }
+                )
+            }
+
+        } // end outer Box
+    } // end ModalNavigationDrawer
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MyItemsPage
+// ─────────────────────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -219,15 +379,24 @@ private fun MyItemsPage(
             title = { Text("Delete Item?") },
             text = { Text("Are you sure you want to delete '${itemToDelete?.title}'?") },
             confirmButton = {
-                TextButton(onClick = { itemToDelete?.let { onDelete(it.remoteId) }; itemToDelete = null }) {
+                TextButton(onClick = {
+                    itemToDelete?.let { onDelete(it.remoteId) }
+                    itemToDelete = null
+                }) {
                     Text("Delete", color = MaterialTheme.colorScheme.error)
                 }
             },
-            dismissButton = { TextButton(onClick = { itemToDelete = null }) { Text("Cancel") } }
+            dismissButton = {
+                TextButton(onClick = { itemToDelete = null }) { Text("Cancel") }
+            }
         )
     }
 
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
         if (items.isEmpty()) {
             ElevatedCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(20.dp)) {
@@ -237,9 +406,17 @@ private fun MyItemsPage(
                 }
             }
         } else {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text("My Items", style = MaterialTheme.typography.titleLarge)
-                Text("Long press ⋮⋮ to reorder", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    "Long press ⋮⋮ to reorder",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             Spacer(Modifier.height(8.dp))
 
@@ -257,41 +434,82 @@ private fun MyItemsPage(
 
             LazyColumn(
                 state = reorderState.listState,
-                modifier = Modifier.fillMaxSize().reorderable(reorderState),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .reorderable(reorderState),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 itemsIndexed(itemsList, key = { _, item -> item.remoteId }) { _, item ->
                     ReorderableItem(reorderState, key = item.remoteId) { isDragging ->
                         val elevation by animateDpAsState(if (isDragging) 8.dp else 0.dp)
                         SwipeToDismissBox(
-                            state = rememberSwipeToDismissBoxState(confirmValueChange = { dismissValue ->
-                                if (dismissValue == SwipeToDismissBoxValue.EndToStart) { itemToDelete = item }
-                                false
-                            }),
+                            state = rememberSwipeToDismissBoxState(
+                                confirmValueChange = { dismissValue ->
+                                    if (dismissValue == SwipeToDismissBoxValue.EndToStart) {
+                                        itemToDelete = item
+                                    }
+                                    false
+                                }
+                            ),
                             backgroundContent = {
-                                Box(modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp), contentAlignment = Alignment.CenterEnd) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(32.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 8.dp),
+                                    contentAlignment = Alignment.CenterEnd
+                                ) {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = "Delete",
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(32.dp)
+                                    )
                                 }
                             },
-                            modifier = Modifier.fillMaxWidth().shadow(elevation)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .shadow(elevation)
                         ) {
-                            ElevatedCard(onClick = { onEdit(item.remoteId) }, modifier = Modifier.fillMaxWidth()) {
-                                Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            ElevatedCard(
+                                onClick = { onEdit(item.remoteId) },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
                                     Icon(
                                         Icons.Default.DragHandle,
                                         contentDescription = "Drag to reorder",
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(24.dp).detectReorderAfterLongPress(reorderState)
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .detectReorderAfterLongPress(reorderState)
                                     )
                                     Spacer(Modifier.width(12.dp))
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text(item.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                        Text(
+                                            item.title,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
                                         if (item.note.isNotBlank()) {
                                             Spacer(Modifier.height(4.dp))
-                                            Text(item.note, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+                                            Text(
+                                                item.note,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 2
+                                            )
                                         }
                                         Spacer(Modifier.height(4.dp))
-                                        Text("Tap to edit • Swipe to delete • Hold ⋮⋮ to reorder", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                                        Text(
+                                            "Tap to edit • Swipe to delete • Hold ⋮⋮ to reorder",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
                                     }
                                 }
                             }
@@ -303,9 +521,14 @@ private fun MyItemsPage(
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PartnerItemsPage
+// ─────────────────────────────────────────────────────────────────────────────
+
 @Composable
 private fun PartnerItemsPage(
     items: List<Item>,
+    partnerNickname: String,
     onGuess: (String) -> Unit
 ) {
     val app = LocalContext.current.applicationContext as Application
@@ -313,7 +536,6 @@ private fun PartnerItemsPage(
     val partnerUid by vm.partnerUid.collectAsState()
     val currentUid = FirebaseAuth.getInstance().currentUser?.uid ?: ""
 
-    // Load game results for current user with current partner
     val gameResults by produceState(
         initialValue = emptyMap<String, com.example.giftquest.data.model.GameResult>(),
         key1 = partnerUid
@@ -322,23 +544,26 @@ private fun PartnerItemsPage(
             com.example.giftquest.data.GameResultsRepository()
                 .gameResultsFlow(currentUid, partnerUid!!)
                 .collect { results ->
-                    // Map by itemId for easy lookup
                     value = results.associateBy { it.itemId }
                 }
         }
     }
 
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
         if (items.isEmpty()) {
             ElevatedCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(20.dp)) {
                     Text("No gifts yet ✨", style = MaterialTheme.typography.titleLarge)
                     Spacer(Modifier.height(8.dp))
-                    Text("Your partner hasn't added any gifts to their wishlist yet.")
+                    Text("$partnerNickname hasn't added any gifts to their wishlist yet.")
                 }
             }
         } else {
-            Text("Partner's Gifts", style = MaterialTheme.typography.titleLarge)
+            Text("$partnerNickname's Gifts 🎁", style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.height(8.dp))
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -360,22 +585,47 @@ private fun PartnerItemsPage(
         }
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NotLinkedPage
+// ─────────────────────────────────────────────────────────────────────────────
+
 @Composable
 private fun NotLinkedPage(onNavigateToLinkScreen: () -> Unit) {
     Column(
-        Modifier.fillMaxSize().padding(32.dp),
+        Modifier
+            .fillMaxSize()
+            .padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text("Not Linked with Partner", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        Text(
+            "Not Linked with Partner",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold
+        )
         Spacer(Modifier.height(16.dp))
-        Text("Link with your partner to see their wishlist and share yours!", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            "Link with your partner to see their wishlist and share yours!",
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
         Spacer(Modifier.height(32.dp))
-        Button(onClick = onNavigateToLinkScreen, modifier = Modifier.fillMaxWidth().height(56.dp)) {
+        Button(
+            onClick = onNavigateToLinkScreen,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+        ) {
             Text("Link with Partner", style = MaterialTheme.typography.titleMedium)
         }
         Spacer(Modifier.height(16.dp))
-        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+        ) {
             Column(Modifier.padding(16.dp)) {
                 Text("How it works:", style = MaterialTheme.typography.titleSmall)
                 Spacer(Modifier.height(8.dp))
