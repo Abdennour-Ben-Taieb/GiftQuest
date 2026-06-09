@@ -59,10 +59,13 @@ jobs:
             python3 -c "
             import binascii, os
             data = os.environ['KEYSTORE_HEX'].strip()
+            print(f'Hex length received: {len(data)}')
+            print(f'First 10 chars: {data[:10]}')
+            print(f'Last 10 chars: {data[-10:]}')
             decoded = binascii.unhexlify(data)
+            print(f'Keystore written: {len(decoded)} bytes')
             with open('app/giftquest-release.jks', 'wb') as f:
                 f.write(decoded)
-            print(f'Keystore written: {len(decoded)} bytes')
             "
 
       - name: Make gradlew executable
