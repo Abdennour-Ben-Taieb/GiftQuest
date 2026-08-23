@@ -51,9 +51,9 @@ android {
             val keystoreFile = file("giftquest-release.jks")
             if (keystoreFile.exists()) {
                 storeFile     = keystoreFile
-                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "444444"
+                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
                 keyAlias      = System.getenv("KEY_ALIAS") ?: "giftquest"
-                keyPassword   = System.getenv("KEYSTORE_PASSWORD") ?: "444444"
+                keyPassword   = System.getenv("KEYSTORE_PASSWORD") ?: ""
             }
         }
     }
