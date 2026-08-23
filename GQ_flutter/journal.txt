@@ -1,0 +1,403 @@
+GiftQuest Flutter — journal
+Running log for the "implement the 8 GiftQuest screens per docs/giftquest_ui_spec.md +
+docs/GiftQuest_UI_Mockups.pdf" task. Newest entries at the bottom... actually newest on
+top so it's readable without scrolling. Keep entries brief.
+
+===============================================================================
+2026-08-24 — Session 1, checkpoint (usage limit hit mid-task, NOT done yet)
+===============================================================================
+
+STATUS: data layer is done and should build. Screens are NOT rebuilt yet — this
+is the next session's job. Read this whole entry before doing anything.
+
+## What this task actually is
+User asked to implement all 8 GiftQuest screens (Home in 3 states, Add/Edit Wish,
+Pairing tab in 2 states, Guess chat, Win/Lose reveal in 2 states, Login/Signup,
+Settings) per docs/giftquest_ui_spec.md ("giftquest_ui_spec (1).md" on disk) and
+docs/"# GiftQuest UI Mockups.pdf", using the existing Sunset Pop theme tokens.
+
+IMPORTANT CONTEXT: there was already a *previous* implementation of Home/Pairing/
+GuessChat/AddEditGift/Login/Signup from an earlier session (see DEV_LOG.md,
+"Sunset Pop redesign" entry) — but it used a different, looser design (grids
+instead of lists, 8-guess cap instead of 5, no visibility/locked-wish concept,
+no wrapped/gifted status, no Settings screen, no real QR code, no Reveal screen).
+This task is a redesign pass that supersedes that work, rebuilding the UI layer
+to match the new spec/mockups exactly while keeping the working Firestore/Groq
+plumbing (repositories, GroqApiClient, GiftContextFetcher) intact underneath.
+
+## Mockups — how I read them
+docs/"# GiftQuest UI Mockups.pdf" is a single tall design-canvas page (2 PDF
+pages, all content on page 1, page 2 is blank). pdftoppm wasn't available so I
+`pip install pymupdf` and rendered it to PNG, then cropped into sections with
+PIL to read at readable resolution. If you need to re-check the mockups next
+session, redo that (poppler still won't be installed): pymupdf IS installed
+already (`python -c "import fitz"` works), so just re-render + crop, no need to
+reinstall. Scratch images were written under the session's temp scratchpad dir,
+which will be gone next session — re-render if needed.
+
+## The two open items — RESOLVED, do not re-ask
+1. "Wrapped" status → renamed to **"gifted"**. Trigger: the GUESSER marks it
+   gifted (not the wisher) — single-step tap, no confirmation dialog, updates
+   immediately. Rationale from user: "the guesser is the one who received the
+   physical gift, so they're the one confirming it happened." Implemented as
+   GameResult.gifted (bool) + giftedAt, guesser-driven via markGifted().
+2. "Brag to partner" / "share the fail" buttons → DROPPED ENTIRELY. User: "we
+   try to guess the gift without the wisher really knowing we did or not
+   otherwise it beats the element of surprise." Do NOT add any share/notify
+   button on the reveal screen. On WIN, that button slot is repurposed for a
+   "mark as gifted" action instead (see below). On LOSE, there's no primary
+   action at all — just "back to home".
+
+## What's actually done (files changed, all should compile)
+- pubspec.yaml: added qr_flutter ^4.1.0 (real QR rendering, pure Dart) and
+  mobile_scanner ^7.1.2 (real camera QR scanning, per spec's "scan QR code
+  (opens camera)"). `flutter pub get` already run successfully.
+- android/app/src/main/AndroidManifest.xml: added CAMERA permission + optional
+  camera uses-feature, for mobile_scanner.
+- ios/Runner/Info.plist: added NSCameraUsageDescription AND
+  NSPhotoLibraryUsageDescription (the latter was actually missing before even
+  for image_picker's existing gallery usage — latent bug, fixed while here).
+- lib/config/game_config.dart: added `maxGuesses = 5` (spec: "capped, 5 by
+  default... tweakable value, not hardcoded").
+- lib/models/gift.dart: renamed `note` → `hint` (Firestore field renamed too;
+  fromFirestore falls back to reading old `note` key for back-compat, doesn't
+  matter much since no real users yet). Added `GiftVisibility` enum
+  (onPairing/onDate/manual), `visibility`, `unlockAt` (DateTime?),
+  `revealedManually` (bool). Added `Gift.isLocked({required bool isPaired})`
+  computing lock state from visibility.
+- lib/models/game_result.dart: added `gifted` (bool) + `giftedAt` (DateTime?).
+- lib/models/user_profile.dart: added `pendingPairRequestTo` /
+  `pendingPairRequestFrom` (uid strings) for the new pairing-request flow
+  (see below — pairing is no longer instant/symmetric).
+- lib/models/chat_message.dart: GameState enum `givenUp` renamed to `lost`
+  (there's no more manual "give up" — every message is a guess, loss is
+  auto-triggered when guesses run out). Updated doc comment.
+- lib/repositories/gifts_repository.dart: addGift/updateGift take `hint`
+  (renamed from note), `visibility`, `unlockAt`. Added `revealNow()` for the
+  owner to manually unlock a `manual`-visibility wish early.
+- lib/repositories/game_results_repository.dart: `saveGameResult` now RETURNS
+  the new doc's id (needed by the reveal screen to call markGifted later).
+  Added `markGifted({itemOwnerId, resultId})` and
+  `streamAllResultsForOwner(ownerUid)` (all results against MY OWN gifts,
+  any guesser — needed for Home's own-wish-list status badges: "hidden" /
+  "guessed by [partner]" / "gifted").
+- lib/repositories/pairing_repository.dart: REWORKED. Old behavior linked both
+  users instantly/symmetrically in one batch. New behavior implements a real
+  request/accept flow because the spec explicitly requires a "waiting for
+  partner to confirm" state, which is impossible with instant linking:
+    - `sendPairRequest({myUid, partnerCode})` — sets myUid.pendingPairRequestTo
+      = partnerUid, partnerUid.pendingPairRequestFrom = myUid. Does NOT link.
+    - `acceptPairRequest({myUid, requesterUid})` — sets linkedWith both ways,
+      clears both pending fields. This is what actually links two accounts now.
+    - `declinePairRequest({myUid, requesterUid})` — clears pending fields, no
+      link.
+    - `cancelMyPendingRequest({myUid, partnerUid})` — lets me cancel a request
+      I sent while still waiting.
+    - `unlinkMe` / `ensureMyShareCode` unchanged.
+- lib/providers/pairing_providers.dart: REWROTE PairingController to match the
+  new repo methods (sendPairRequest/acceptPairRequest/declinePairRequest/
+  cancelMyPendingRequest/unlink). Added `myOwnGameResultsProvider` (streams
+  streamAllResultsForOwner for the signed-in user — for Home's own-list
+  status). Old `linkWithPartnerCode` method/provider is GONE, replaced.
+- lib/providers/guess_chat_providers.dart: REWROTE.
+    - GuessChatState gained `item` (Gift?, loaded up front now even on the
+      already-played path — previously `_item` was a private field only set
+      on the fresh-game path, which would have left the reveal screen with
+      nothing to show for a replay). Also gained `resultId` (String?) and
+      `gifted` (bool).
+    - `_load()` now ALWAYS fetches the Gift first (title/hint/category/price/
+      photo needed by the reveal screen regardless of path), THEN checks for
+      an existing GameResult. If one exists, state is set directly to
+      GameState.won/lost (not a separate "alreadyPlayed" branch minus data)
+      with guessCount/resultId/gifted all populated from the saved result —
+      so re-opening an already-finished wish can go straight to the Reveal
+      screen with full data, no special-casing needed downstream.
+    - `sendGuess()`: on a correct guess, saves result, captures resultId. On
+      an incorrect guess where guessCount has now hit GameConfig.maxGuesses,
+      AUTO-finalizes as a loss (saves result, captures resultId) — no manual
+      give-up button/flow anymore, matches the mockup (input row is just a
+      text field + send button, no separate "give up" affordance).
+    - `_gamePrompt()`: updated to reference `item.hint` instead of `item.note`,
+      reworded the prompt so hint is explicitly "the only extra evidence you
+      may draw on" (spec: "hint = the only evidence the AI is allowed to draw
+      on").
+    - Added `markGifted()` — calls the repo, updates local state.gifted.
+- lib/theme.dart: added `AppColors.success` (mint green, `#A8E6C1`) and
+  `AppColors.onSuccess` for the win-state reveal screen icon — this isn't a
+  ColorScheme slot (Material's scheme has no "success" concept), so it's a
+  plain static like the other AppColors tokens, used directly rather than via
+  Theme.of(context).colorScheme.
+
+## What's NOT done yet — this is the actual remaining work
+Screens have NOT been touched yet (still the old pre-redesign versions, which
+now likely DON'T COMPILE against the new models — e.g. any screen reading
+`gift.note` or calling the old `linkWithPartnerCode` will break). Do NOT trust
+`flutter analyze` to be clean right now — it almost certainly isn't, because
+the screens still reference the old API surface. This is expected and is next.
+
+Remaining work, in the order I'd do it:
+
+1. lib/widgets/ — may need a couple of small new pieces (check what exists
+   first, don't duplicate): an outcome-icon sticker (rounded square, tinted
+   background, big icon — used on Reveal win/lose), maybe a small "locked row"
+   pattern. Sticker.dart (StickerCard/StickerButton/StickerAvatar) and
+   PillToggle already exist and match the mockup style well — reuse them, no
+   need to redesign those primitives.
+
+2. lib/screens/home_screen.dart — REWRITE. Currently a 2-col GRID; spec/mockup
+   want a vertical LIST of rows (44dp square thumbnail, title, status
+   subtitle, trailing icon). Needed states, all seen directly in the mockup
+   crops (details below so you don't have to re-render the PDF):
+     - Header: "hey, [Mila]" two-line greeting top-left, circular avatar
+       top-right (tap → account menu, existing bottom-sheet pattern is fine).
+     - PillToggle: "my wishes" / partner's name (existing widget, keep).
+     - My Wishes row status + icon, in this exact order of precedence:
+         locked (visibility check via Gift.isLocked(isPaired: ...)) → whole
+           row faded ~50% opacity, lock icon (Icons.lock_outline), label
+           "unlocks {date}" (format like "24 Dec") for onDate visibility, or
+           just "locked" for manual visibility that hasn't been revealed.
+         else if no GameResult exists for this gift (any guesser) → status
+           "hidden", icon = eye-slash (Icons.visibility_off_outlined).
+         else if GameResult exists && !gifted → status "guessed by
+           [partner name]", icon = check (Icons.check_circle, green-ish).
+         else if GameResult exists && gifted → status "gifted", icon =
+           Icons.card_giftcard.
+       Use myOwnGameResultsProvider (keyed by gift.id, first match — only one
+       partner so no guesserUid disambiguation needed) + partner's profile
+       name for the label. Needs isPaired bool (myProfile.isLinked).
+     - Partner tab, BEFORE pairing: render the Pairing content inline (QR +
+       code + enter-code field + scan button + waiting state) — spec says
+       "single tab slot that shows different content depending on pairing
+       state, not two separate screens/routes". Currently the old code shows
+       a "_NotLinkedState" with a button that PUSHES PairingScreen as a
+       separate route — that's the wrong pattern per spec, fix it: the
+       partner tab itself IS the pairing UI when unpaired, no navigation.
+       (Keep pairing_screen.dart too, if you want a way to reach it from
+       Settings — but the primary entry point is inline in Home per spec.)
+     - Partner tab, AFTER pairing: same row pattern as My Wishes but for the
+       partner's gifts, anonymized until guessed:
+         locked → faded, lock icon, "unlocks {date}", not tappable (or tap
+           shows a brief "not unlocked yet" toast).
+         not yet played, unlocked → title shown as "wish #N" (anonymized,
+           1-indexed by list position — matches mockup's "wish #1"/"wish #3"),
+           "?" icon (Icons.help_outline) in a filled circle, subtitle "N
+           guesses left" (GameConfig.maxGuesses, or remaining if they'd
+           started — but since ungested means 0 guesses so far, just show
+           "{maxGuesses} guesses left"), small chat-bubble icon trailing
+           (Icons.chat_bubble_outline) as a tap affordance. Tap → GuessChatScreen.
+         already resolved (won OR lost) → title revealed to the real gift
+           title once won ("Wool scarf"), OR stays anonymized "wish #N" if
+           lost (never revealed on a loss — check mockup only showed the win
+           case; a lost-and-exhausted wish should probably reveal the title
+           too since the Reveal-lose mockup shows "IT WAS / Harmonica" — so
+           losing DOES reveal the title on the reveal screen, just not
+           necessarily on the row; use your judgment, revealing on the row
+           too is simplest/consistent), check icon for won ("you got this
+           one") or a distinct icon for lost (e.g. Icons.close or a sad-face
+           equivalent — not in mockup, improvise consistently), chevron
+           trailing (Icons.chevron_right) since tap reopens read-only into
+           RevealScreen (see nav note below), not back into chat.
+     - Empty state (My Wishes, zero gifts): dashed-border gift-box icon
+       tile, headline "nothing hidden yet", body "Add a wish and [partner]
+       will have to guess his way to it." (use partner's actual name),
+       button "add first wish" (StickerButton primary, NOT full-width per
+       mockup — sized to content, centered). FAB still present bottom-right
+       even in empty state.
+     - Loading state (Firestore stream not yet resolved): 3 skeleton rows
+       (grey rounded rects standing in for thumbnail + 2 text lines) + a
+       small animated "• • •" three-dot loader beneath. Keep simple — a
+       gentle opacity pulse (AnimatedOpacity looping) is enough, don't reach
+       for a shimmer package.
+     - FAB: circular, bottom-right, `+` icon, purple/secondary fill — only
+       shown on My Wishes tab (existing behavior, keep).
+     - Bottom nav: exactly 2 items, Home (active — purple icon + underline
+       per mockup) and Settings (gear icon, tap → push SettingsScreen). This
+       doesn't exist yet in the old code at all — build a small custom bottom
+       bar widget (not Material's default BottomNavigationBar, to match the
+       mockup's underline-active-indicator look), OR at minimum a Material
+       one restyled — your call, but it needs to visually match (purple
+       active icon with an underline bar beneath it, per the mockup crop).
+
+3. lib/screens/add_edit_gift_screen.dart — REWRITE layout order to match
+   mockup: back arrow + "edit wish"/"add wish" title header → dashed-border
+   photo picker (icon + "add a photo" placeholder text, matches existing
+   StickerAvatar-ish but mockup shows a RECTANGULAR dashed box, not circular
+   — may need a new widget, don't just reuse StickerAvatar which is circular)
+   → "TITLE" label + text field → "HINT FOR THE AI" label with trailing
+   caption "only the AI sees this" + multiline text area → "GUESSABLE" label
+   + dropdown (maps to GiftVisibility: "as soon as we're paired" / "on a set
+   date" (shows a date picker inline when selected, writes unlockAt) /
+   "manually" — wording is mine to pick, mockup only showed the pairing
+   option selected) → "save wish" button (primary, full width) → "delete
+   wish" button (edit mode only, destructive/outline style with red-ish
+   text, full width, below save). Category/price/link fields aren't in the
+   mockup at all but ARE used by the existing AI-prompt/context-fetch logic
+   (price bucketing, category context, link for GiftContextFetcher) — my
+   plan (not yet executed) was to keep them as a collapsed "more details
+   (optional)" section below the mockup's core fields rather than deleting
+   real functionality the user didn't ask to lose. Use your judgment if this
+   still seems right.
+
+4. lib/screens/pairing_screen.dart — REWRITE (or fold into Home per point 2 —
+   decide whether this file becomes the shared inline-in-Home widget, or
+   stays a standalone screen reachable elsewhere too; either is fine, don't
+   duplicate the UI). Needed pieces:
+     - Real QR code rendering my own share code, via qr_flutter's QrImageView
+       (already added to pubspec). Replace the old placeholder box.
+     - Own code text below QR, "or" divider, "enter partner's code" field,
+       "scan QR code" button (primary-ish purple/indigo fill per mockup).
+     - Tapping "scan QR code" → push a new scanner screen/route using
+       mobile_scanner's MobileScanner widget; on a successful scan, feed the
+       decoded string into the same code-submit path as manual entry
+       (sendPairRequest). Handle camera-permission-denied gracefully (show a
+       message, don't crash) since this can't be tested on-device per
+       CLAUDE.md's testing boundary.
+     - New "waiting for [partner] to confirm" state: shown when
+       myProfile.pendingPairRequestTo != null — small text row with a status
+       dot, per mockup ("• waiting for Theo to confirm"), shown BELOW the
+       QR/code/scan content (not replacing it — the mockup shows both at
+       once). Give it a way to cancel (calls cancelMyPendingRequest).
+     - New incoming-request state: when myProfile.pendingPairRequestFrom !=
+       null — show a card above everything else, "[name] wants to pair" with
+       Accept/Decline buttons (acceptPairRequest/declinePairRequest). Not in
+       the mockup (mockup only shows the outbound-waiting side) but required
+       for the accept flow to be reachable at all — my design choice, keep it
+       simple.
+     - Linked state: mostly reuse existing _LinkedCard + unlink button.
+
+5. lib/screens/guess_chat_screen.dart — REWRITE to match mockup: header shows
+   "[partner]'s wish #N" (or the real title if — actually no, header should
+   probably show anonymized label too before it's won, check your own
+   judgement) + subtitle "hidden since {gift.createdAt formatted}", trailing
+   pill "⚡ {guessCount}/{GameConfig.maxGuesses}" (replace the old 8-segment
+   progress bar — mockup uses a plain "3/5" pill with a lightning icon, much
+   simpler, use that instead). First AI message can render as a lighter/
+   dashed "system hint" pill per mockup ("ask anything — I'll answer, but I
+   won't say it outright") — this text doesn't come from Groq in the current
+   flow (the greeting call does something different); simplest path is to
+   prepend this as a static local UI element above the real message list
+   rather than trying to get the LLM to say exactly this, OR fold it into
+   the existing greeting prompt's expected phrasing — your call. Bubbles:
+   keep existing dark-AI-left / purple-user-right style, already close to
+   mockup. Input row: text field placeholder "type your guess..." (not "Ask
+   a question...") + circular send button with a paper-plane icon (replace
+   the old "I think I know!" StickerButton — mockup has no separate guess-vs-
+   question distinction, every send IS a guess, matches how sendGuess already
+   works). REMOVE the old game-over banner + "give up"-adjacent UI entirely —
+   on win/lost, navigate away to RevealScreen instead (pushReplacement, so
+   back from Reveal goes to the partner list, not back into a dead chat).
+   Use `ref.listen` on the controller in build() (guard with a `_navigated`
+   bool field to avoid double-navigation) to trigger that pushReplacement as
+   soon as gameState flips to won/lost, AND also on initial load if the
+   state resolves directly to won/lost (the already-played path) — in that
+   case you may want to skip the chat screen being visible at all and go
+   straight to Reveal (check state.item != null && gameState != playing
+   right after the first frame). Simplest robust approach: give
+   GuessChatScreen a check at the top of build()/initState that if
+   itemAlready resolved (via a quick synchronous read attempt) it could
+   still just let the controller load then redirect — a brief flash of the
+   chat screen's loading spinner before redirecting is fine, don't
+   over-engineer this.
+
+6. lib/screens/reveal_screen.dart — NEW FILE. Args needed: won (bool),
+   guessCount (int), item (Gift), resultId (String?), gifted (bool),
+   itemOwnerId (String), itemId (String) — basically just take the whole
+   GuessChatArgs + a snapshot of the relevant GuessChatState fields, simplest
+   as a plain data class or just pass the individual fields as constructor
+   params (ConsumerStatefulWidget so it can call markGifted via the SAME
+   guessChatControllerProvider(args) family instance — since it's
+   autoDispose, calling `ref.read(guessChatControllerProvider(args).notifier)
+   .markGifted()` from the Reveal screen should work fine as long as Reveal
+   is pushed while that provider instance is still alive, i.e. don't pop the
+   chat screen before pushing Reveal — use pushReplacement, not pop-then-push,
+   so the family instance survives; if navigating here from Home's "already
+   resolved" partner-tab row instead of from the chat screen, a NEW instance
+   of the controller will spin up which is fine since it re-derives the same
+   state from Firestore in _load()).
+   Layout per mockup:
+     - Full-bleed background: subtle radial gradient tint — green-ish dark
+       for win (matches AppColors.success at low opacity radiating from
+       center-top), warm coral/dark-red-ish tint for lose (use
+       colorScheme.error at low opacity). Plain Container + gradient decoration,
+       nothing fancy.
+     - Outcome icon: ~140dp rounded-square sticker, tinted fill (mint green
+       for win / soft coral for lose — lose one in the mockup is DASHED
+       border, not solid, worth matching), icon centered (win: a small
+       gift-card/ticket icon, Icons.card_giftcard works; lose: a sad face,
+       Icons.sentiment_dissatisfied or similar).
+     - Headline: "you got it!" (win) / "so close" (lose), Fredoka display style.
+     - Subhead: win = "{N} guesses. [partner] is going to be a little
+       annoyed." pattern (mockup literal text was flavor copy, feel free to
+       generate similarly playful text using guessCount) — lose = "Out of
+       guesses. You were one word away on guess four." style flavor text
+       (again, mockup text is an example, not literal copy to hardcode
+       verbatim — write something in that voice referencing guessCount).
+     - Result card: "THE WISH" (win) / "IT WAS" (lose) label, gift title
+       bold, one-line detail below (use item.hint, first line/truncated, as
+       the detail text — no separate field for this exists), small thumbnail
+       square on the left (item.photoUrl if present else a placeholder).
+     - Primary action:
+         WIN, not yet gifted → StickerButton "mark as gifted" (or similar
+           wording), primary variant, calls controller.markGifted(), shows
+           a brief loading state, then flips to...
+         WIN, already gifted → replace the button with a static confirmation
+           (e.g. a plain row/label "🎁 marked as gifted", no button) — don't
+           leave a re-tappable button once it's done.
+         LOSE → NO primary action button at all (brag/share was dropped per
+           user's explicit answer — do not add anything here).
+     - Secondary action: "back to home" (outline/secondary StickerButton,
+       full width) — pops all the way back to HomeScreen
+       (Navigator.popUntil or pushAndRemoveUntil to a known Home route,
+       since we got here via pushReplacement chains, plain pop() may not
+       land on Home — verify the nav stack shape once chat screen's
+       pushReplacement is wired and adjust).
+
+7. lib/screens/settings_screen.dart — NEW FILE. Simple bordered list (per
+   spec: "CDS 'dense lists: bordered rows, not rounded-rect cards'
+   convention"), rows: Account (maybe just shows name/email, non-interactive
+   or opens a small edit sheet — keep minimal), Notification preferences
+   (placeholder/stub — no push infra exists per DEV_LOG, so this can just be
+   a visual row that doesn't do much, or a simple local-only toggle), Privacy
+   (stub, maybe just static text or an external-link-style row), Unlink
+   partner (calls pairingController.unlink(), confirm dialog first — reuse
+   pattern from the old pairing screen's unlink button), Logout (existing
+   authRepository.signOut() + navigate to LoginScreen, same as the account
+   bottom-sheet already has). Keep it low-risk/low-scope per spec ("standard,
+   low-risk patterns").
+
+## Verification still to do (none of this has run yet against new screens)
+- `flutter analyze` — expect failures right now against old screen files
+  until step 2-7 above are done. Don't stop at analyze warnings on files
+  listed above; they're expected until rewritten.
+- Once screens are rewritten and analyze is clean, run an actual
+  `flutter build apk --debug` (or appbundle) — NOT just analyze — to verify
+  mobile_scanner's native Android wiring actually compiles, since Gradle/
+  manifest issues won't show up in `flutter analyze`. This is within the
+  CLAUDE.md testing boundary ("code builds without errors" is explicitly my
+  responsibility) — building is fine, RUNNING/adb/emulator is NOT, don't
+  cross that line.
+- Do NOT run the app, use adb, or touch an emulator/device at any point —
+  hard constraint from both CLAUDE.md and the task prompt.
+- Do NOT git add/commit/push/branch/PR anything — hard constraint from the
+  task prompt, leave everything as uncommitted local changes for the user to
+  review themselves.
+
+## Misc notes / gotchas for next session
+- login_screen.dart and signup_screen.dart were reviewed and are FINE AS-IS —
+  they already match the Sunset Pop / sticker-shadow style well from the
+  earlier session, spec explicitly says these two just need to match
+  established style (no mockup exists for them). Don't waste time redoing
+  them unless something's actually broken.
+- lib/widgets/sticker.dart, lib/widgets/pill_toggle.dart, lib/widgets/
+  auth_hero.dart, lib/widgets/google_sign_in_button.dart — all fine, reuse
+  as-is.
+- GameConfig.maxGuesses = 5 is the new cap (was 8 in the old grid-based UI —
+  make sure no leftover "8" constants remain anywhere in rewritten screens).
+- Remember the rename: Gift.note → Gift.hint (Firestore field also renamed
+  to "hint", with graceful fallback reading old "note" key). Any screen code
+  referencing `.note` needs to become `.hint`.
+- Remember: PairingRepository.linkWithPartnerCode no longer exists — it's
+  sendPairRequest/acceptPairRequest/declinePairRequest/
+  cancelMyPendingRequest now. Any old screen code calling the old method
+  name will fail to compile.
+- Remember: GameState.givenUp renamed to GameState.lost.

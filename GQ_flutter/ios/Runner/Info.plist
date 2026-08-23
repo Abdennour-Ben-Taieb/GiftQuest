@@ -4,6 +4,10 @@
 	<dict>
 		<key>CADisableMinimumFrameDurationOnPhone</key>
 		<true/>
+		<key>NSCameraUsageDescription</key>
+		<string>GiftQuest uses the camera to scan your partner's pairing QR code.</string>
+		<key>NSPhotoLibraryUsageDescription</key>
+		<string>GiftQuest uses your photo library to attach a picture to a wish or your profile.</string>
 		<key>CFBundleDevelopmentRegion</key>
 		<string>$(DEVELOPMENT_LANGUAGE)</string>
 		<key>CFBundleDisplayName</key>

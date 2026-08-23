@@ -12,8 +12,14 @@ class PairingRepository {
   })  : _fs = firestore ?? FirebaseFirestore.instance,
         _gameResultsRepo = gameResultsRepo ?? GameResultsRepository();
 
-  /// Links two users together using a share code. Returns the partner's uid.
-  Future<String> linkWithPartnerCode({
+  DocumentReference<Map<String, dynamic>> _userDoc(String uid) =>
+      _fs.collection('users').doc(uid);
+
+  /// Sends a pairing request to whoever owns [partnerCode] — marks both
+  /// sides as pending rather than linking immediately, since confirmation
+  /// is the partner's external action, not something this call can decide.
+  /// Returns the partner's uid.
+  Future<String> sendPairRequest({
     required String myUid,
     required String partnerCode,
   }) async {
@@ -28,17 +34,57 @@ class PairingRepository {
     }
 
     final batch = _fs.batch();
-    batch.update(_fs.collection('users').doc(myUid), {'linkedWith': partnerUid});
-    batch.update(_fs.collection('users').doc(partnerUid), {'linkedWith': myUid});
+    batch.update(_userDoc(myUid), {'pendingPairRequestTo': partnerUid});
+    batch.update(_userDoc(partnerUid), {'pendingPairRequestFrom': myUid});
     await batch.commit();
 
     return partnerUid;
   }
 
+  /// Accepts an incoming request from [requesterUid] — links both accounts
+  /// and clears the pending flags on both sides.
+  Future<void> acceptPairRequest({
+    required String myUid,
+    required String requesterUid,
+  }) async {
+    final batch = _fs.batch();
+    batch.update(_userDoc(myUid), {
+      'linkedWith': requesterUid,
+      'pendingPairRequestFrom': null,
+    });
+    batch.update(_userDoc(requesterUid), {
+      'linkedWith': myUid,
+      'pendingPairRequestTo': null,
+    });
+    await batch.commit();
+  }
+
+  /// Declines an incoming request from [requesterUid] — no link is made.
+  Future<void> declinePairRequest({
+    required String myUid,
+    required String requesterUid,
+  }) async {
+    final batch = _fs.batch();
+    batch.update(_userDoc(myUid), {'pendingPairRequestFrom': null});
+    batch.update(_userDoc(requesterUid), {'pendingPairRequestTo': null});
+    await batch.commit();
+  }
+
+  /// Cancels a request I sent that hasn't been accepted/declined yet.
+  Future<void> cancelMyPendingRequest({
+    required String myUid,
+    required String partnerUid,
+  }) async {
+    final batch = _fs.batch();
+    batch.update(_userDoc(myUid), {'pendingPairRequestTo': null});
+    batch.update(_userDoc(partnerUid), {'pendingPairRequestFrom': null});
+    await batch.commit();
+  }
+
   /// Unlinks the current user from their partner and deletes only the
   /// current user's own game results (partner's results are their own data).
   Future<void> unlinkMe(String myUid) async {
-    final myDoc = await _fs.collection('users').doc(myUid).get();
+    final myDoc = await _userDoc(myUid).get();
     final partnerUid = myDoc.data()?['linkedWith'] as String?;
 
     if (partnerUid != null) {
@@ -49,9 +95,9 @@ class PairingRepository {
     }
 
     final batch = _fs.batch();
-    batch.update(_fs.collection('users').doc(myUid), {'linkedWith': null});
+    batch.update(_userDoc(myUid), {'linkedWith': null});
     if (partnerUid != null) {
-      batch.update(_fs.collection('users').doc(partnerUid), {'linkedWith': null});
+      batch.update(_userDoc(partnerUid), {'linkedWith': null});
     }
     await batch.commit();
   }

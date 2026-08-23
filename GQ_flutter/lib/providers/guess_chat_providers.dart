@@ -19,28 +19,42 @@ class GuessChatState {
     this.isLoading = true,
     this.gameState = GameState.playing,
     this.guessCount = 0,
-    this.revealedTitle,
+    this.item,
+    this.resultId,
+    this.gifted = false,
   });
 
   final List<ChatMessage> messages;
   final bool isLoading;
   final GameState gameState;
   final int guessCount;
-  final String? revealedTitle;
+
+  /// The wish being guessed — loaded once at start, kept around so the
+  /// reveal screen has the title/hint/photo without a second fetch.
+  final Gift? item;
+
+  /// The saved GameResult's doc id, once the game has ended — needed to
+  /// call markGifted from the reveal screen.
+  final String? resultId;
+  final bool gifted;
 
   GuessChatState copyWith({
     List<ChatMessage>? messages,
     bool? isLoading,
     GameState? gameState,
     int? guessCount,
-    String? revealedTitle,
+    Gift? item,
+    String? resultId,
+    bool? gifted,
   }) {
     return GuessChatState(
       messages: messages ?? this.messages,
       isLoading: isLoading ?? this.isLoading,
       gameState: gameState ?? this.gameState,
       guessCount: guessCount ?? this.guessCount,
-      revealedTitle: revealedTitle ?? this.revealedTitle,
+      item: item ?? this.item,
+      resultId: resultId ?? this.resultId,
+      gifted: gifted ?? this.gifted,
     );
   }
 }
@@ -55,7 +69,6 @@ class GuessChatController extends Notifier<GuessChatState> {
 
   final GuessChatArgs args;
 
-  Gift? _item;
   String _enrichedContext = '';
 
   String get _guesserUid =>
@@ -68,6 +81,28 @@ class GuessChatController extends Notifier<GuessChatState> {
   }
 
   Future<void> _load() async {
+    Gift? item;
+    try {
+      final gifts = await ref
+          .read(giftsRepositoryProvider)
+          .streamGifts(args.itemOwnerId)
+          .first;
+      for (final g in gifts) {
+        if (g.id == args.itemId) {
+          item = g;
+          break;
+        }
+      }
+    } catch (_) {
+      // fall through — item stays null, handled below
+    }
+
+    if (item == null) {
+      state = state.copyWith(isLoading: false);
+      return;
+    }
+    state = state.copyWith(item: item);
+
     final existing = await ref
         .read(gameResultsRepositoryProvider)
         .getResultForItem(
@@ -77,42 +112,23 @@ class GuessChatController extends Notifier<GuessChatState> {
         );
 
     if (existing != null) {
-      state = GuessChatState(
+      state = state.copyWith(
         isLoading: false,
-        gameState: GameState.alreadyPlayed,
+        gameState: existing.won ? GameState.won : GameState.lost,
         guessCount: existing.guessCount,
+        resultId: existing.id,
+        gifted: existing.gifted,
       );
       return;
     }
 
-    try {
-      final gifts = await ref
-          .read(giftsRepositoryProvider)
-          .streamGifts(args.itemOwnerId)
-          .first;
-      Gift? item;
-      for (final g in gifts) {
-        if (g.id == args.itemId) {
-          item = g;
-          break;
-        }
-      }
-      if (item == null) {
-        state = state.copyWith(isLoading: false);
-        return;
-      }
-      _item = item;
+    unawaited(
+      GiftContextFetcher.fetch(
+        item.link,
+      ).then((ctx) => _enrichedContext = ctx),
+    );
 
-      unawaited(
-        GiftContextFetcher.fetch(
-          item.link,
-        ).then((ctx) => _enrichedContext = ctx),
-      );
-
-      await _sendGreeting();
-    } catch (_) {
-      state = state.copyWith(isLoading: false);
-    }
+    await _sendGreeting();
   }
 
   Future<void> _sendGreeting() async {
@@ -131,12 +147,13 @@ class GuessChatController extends Notifier<GuessChatState> {
 
   Future<void> sendGuess(String text) async {
     if (state.gameState != GameState.playing) return;
-    final item = _item;
+    final item = state.item;
     if (item == null) return;
 
     final historyBeforeThis = state.messages;
+    final newGuessCount = state.guessCount + 1;
     state = state.copyWith(
-      guessCount: state.guessCount + 1,
+      guessCount: newGuessCount,
       messages: [...state.messages, ChatMessage(sender: Sender.user, text: text)],
       isLoading: true,
     );
@@ -148,39 +165,27 @@ class GuessChatController extends Notifier<GuessChatState> {
       model: GameConfig.modelGame,
     );
 
+    final won = response.toLowerCase().contains('correct_guess');
+
     state = state.copyWith(
       isLoading: false,
       messages: [...state.messages, ChatMessage(sender: Sender.ai, text: response)],
     );
 
-    if (response.toLowerCase().contains('correct_guess')) {
-      state = state.copyWith(gameState: GameState.won, revealedTitle: item.title);
-      await _saveResult(won: true);
+    if (won) {
+      state = state.copyWith(gameState: GameState.won);
+      final resultId = await _saveResult(won: true);
+      state = state.copyWith(resultId: resultId);
+    } else if (newGuessCount >= GameConfig.maxGuesses) {
+      state = state.copyWith(gameState: GameState.lost);
+      final resultId = await _saveResult(won: false);
+      state = state.copyWith(resultId: resultId);
     }
   }
 
-  Future<void> giveUp() async {
-    final item = _item;
-    if (item == null || state.gameState != GameState.playing) return;
-
-    final reveal = StringBuffer('The gift was: ${item.title}');
-    if (item.category.isNotEmpty) reveal.write(' (${item.category})');
-    if (item.price > 0) {
-      reveal.write(', about €${item.price.toStringAsFixed(0)}');
-    }
-    if (item.link.isNotEmpty) reveal.write('\n${item.link}');
-
-    state = state.copyWith(
-      gameState: GameState.givenUp,
-      revealedTitle: item.title,
-      messages: [...state.messages, ChatMessage(sender: Sender.ai, text: reveal.toString())],
-    );
-    await _saveResult(won: false);
-  }
-
-  Future<void> _saveResult({required bool won}) async {
+  Future<String?> _saveResult({required bool won}) async {
     try {
-      await ref.read(gameResultsRepositoryProvider).saveGameResult(
+      return await ref.read(gameResultsRepositoryProvider).saveGameResult(
             itemId: args.itemId,
             itemOwnerId: args.itemOwnerId,
             guesserUid: _guesserUid,
@@ -190,6 +195,23 @@ class GuessChatController extends Notifier<GuessChatState> {
           );
     } catch (_) {
       // Matches the Kotlin app: a failed save shouldn't break the game UI.
+      return null;
+    }
+  }
+
+  /// Called from the reveal screen once the guesser confirms they've
+  /// actually received the physical gift.
+  Future<void> markGifted() async {
+    final resultId = state.resultId;
+    if (resultId == null || state.gifted) return;
+    try {
+      await ref.read(gameResultsRepositoryProvider).markGifted(
+            itemOwnerId: args.itemOwnerId,
+            resultId: resultId,
+          );
+      state = state.copyWith(gifted: true);
+    } catch (_) {
+      // Leave gifted unset; the button remains tappable to retry.
     }
   }
 
@@ -228,13 +250,13 @@ THE GIFT (SECRET — never reveal directly):
 - Name: ${item.title}
 - Category: ${item.category}
 - Price: $priceRange
-- Note: ${item.note.isEmpty ? 'none' : item.note}
+- Hint (the only extra evidence you may draw on): ${item.hint.isEmpty ? 'none' : item.hint}
 $_enrichedContext
 DIFFICULTY: ${Difficulty.medium.promptText}
 
 RULES:
 1. Never say the gift name or reveal it directly.
-2. Answer yes/no questions truthfully but cleverly.
+2. Answer yes/no questions truthfully but cleverly, using only the hint above and the structured fields — never invent details beyond them.
 3. Give vague category hints when helpful.
 4. Accept synonyms and close matches as correct.
 5. When the partner guesses correctly, respond with:

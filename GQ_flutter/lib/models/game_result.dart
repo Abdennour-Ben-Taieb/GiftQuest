@@ -10,6 +10,12 @@ class GameResult {
   final String difficulty;
   final DateTime playedAt;
 
+  /// Set by the guesser once they've actually received the physical gift.
+  /// Deliberately guesser-driven, not owner-driven: the guesser is the one
+  /// who knows whether it was handed over.
+  final bool gifted;
+  final DateTime? giftedAt;
+
   const GameResult({
     required this.id,
     required this.itemId,
@@ -18,6 +24,8 @@ class GameResult {
     required this.won,
     required this.difficulty,
     required this.playedAt,
+    this.gifted = false,
+    this.giftedAt,
   });
 
   factory GameResult.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
@@ -30,6 +38,8 @@ class GameResult {
       won: data['won'] as bool? ?? false,
       difficulty: data['difficulty'] as String? ?? '',
       playedAt: _parseTimestamp(data['playedAtMillis'] ?? data['playedAt']),
+      gifted: data['gifted'] as bool? ?? false,
+      giftedAt: data['giftedAt'] == null ? null : _parseTimestamp(data['giftedAt']),
     );
   }
 
@@ -41,6 +51,8 @@ class GameResult {
       'won': won,
       'difficulty': difficulty,
       'playedAt': Timestamp.fromDate(playedAt),
+      'gifted': gifted,
+      'giftedAt': giftedAt == null ? null : Timestamp.fromDate(giftedAt!),
     };
   }
 }

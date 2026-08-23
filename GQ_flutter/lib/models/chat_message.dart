@@ -9,7 +9,9 @@ class ChatMessage {
   const ChatMessage({required this.sender, required this.text});
 }
 
-enum GameState { playing, won, givenUp, alreadyPlayed }
+/// `lost` covers the only way a game now ends unsuccessfully: guesses run
+/// out. There's no manual "give up" — every message sent is a guess.
+enum GameState { playing, won, lost, alreadyPlayed }
 
 enum Difficulty {
   easy('Easy 🟢', 'Give generous hints readily. Confirm close guesses.'),

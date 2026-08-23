@@ -35,6 +35,14 @@ final gameResultsForOwnerProvider =
       );
 });
 
+/// Every result recorded against the signed-in user's own gifts (any
+/// guesser) — used to badge their own Home list with "guessed by X"/"gifted".
+final myOwnGameResultsProvider = StreamProvider<List<GameResult>>((ref) {
+  final uid = ref.watch(firebaseAuthProvider).currentUser?.uid;
+  if (uid == null) return Stream.value(const []);
+  return ref.watch(gameResultsRepositoryProvider).streamAllResultsForOwner(uid);
+});
+
 class PairingActionState {
   const PairingActionState({this.loading = false, this.error});
 
@@ -46,7 +54,7 @@ class PairingController extends Notifier<PairingActionState> {
   @override
   PairingActionState build() => const PairingActionState();
 
-  Future<bool> linkWithPartnerCode(String code) async {
+  Future<bool> sendPairRequest(String code) async {
     final myUid = ref.read(firebaseAuthProvider).currentUser?.uid;
     if (myUid == null) return false;
     if (code.trim().isEmpty) {
@@ -58,12 +66,54 @@ class PairingController extends Notifier<PairingActionState> {
     try {
       await ref
           .read(pairingRepositoryProvider)
-          .linkWithPartnerCode(myUid: myUid, partnerCode: code.trim());
+          .sendPairRequest(myUid: myUid, partnerCode: code.trim());
       state = const PairingActionState();
       return true;
     } catch (e) {
       state = PairingActionState(error: e.toString());
       return false;
+    }
+  }
+
+  Future<void> acceptPairRequest(String requesterUid) async {
+    final myUid = ref.read(firebaseAuthProvider).currentUser?.uid;
+    if (myUid == null) return;
+    state = const PairingActionState(loading: true);
+    try {
+      await ref
+          .read(pairingRepositoryProvider)
+          .acceptPairRequest(myUid: myUid, requesterUid: requesterUid);
+      state = const PairingActionState();
+    } catch (e) {
+      state = PairingActionState(error: e.toString());
+    }
+  }
+
+  Future<void> declinePairRequest(String requesterUid) async {
+    final myUid = ref.read(firebaseAuthProvider).currentUser?.uid;
+    if (myUid == null) return;
+    state = const PairingActionState(loading: true);
+    try {
+      await ref
+          .read(pairingRepositoryProvider)
+          .declinePairRequest(myUid: myUid, requesterUid: requesterUid);
+      state = const PairingActionState();
+    } catch (e) {
+      state = PairingActionState(error: e.toString());
+    }
+  }
+
+  Future<void> cancelMyPendingRequest(String partnerUid) async {
+    final myUid = ref.read(firebaseAuthProvider).currentUser?.uid;
+    if (myUid == null) return;
+    state = const PairingActionState(loading: true);
+    try {
+      await ref
+          .read(pairingRepositoryProvider)
+          .cancelMyPendingRequest(myUid: myUid, partnerUid: partnerUid);
+      state = const PairingActionState();
+    } catch (e) {
+      state = PairingActionState(error: e.toString());
     }
   }
 

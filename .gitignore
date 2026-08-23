@@ -1,2 +1,3 @@
 ﻿# Root-level IDE metadata (each subfolder has its own project)
 .idea/
+dart_defines.json

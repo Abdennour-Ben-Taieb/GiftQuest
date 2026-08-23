@@ -25,8 +25,10 @@ class GiftsRepository {
     required String category,
     required double price,
     required String link,
-    required String note,
+    required String hint,
     String? photoUrl,
+    GiftVisibility visibility = GiftVisibility.onPairing,
+    DateTime? unlockAt,
   }) async {
     final col = _itemsCol(userId);
 
@@ -42,11 +44,14 @@ class GiftsRepository {
       'category': category,
       'price': price,
       'link': link,
-      'note': note,
+      'hint': hint,
       'position': nextPos,
       'createdAt': Timestamp.fromDate(now),
       'updatedAt': Timestamp.fromDate(now),
       'photoUrl': photoUrl,
+      'visibility': visibility.value,
+      'unlockAt': unlockAt == null ? null : Timestamp.fromDate(unlockAt),
+      'revealedManually': false,
     });
   }
 
@@ -57,22 +62,31 @@ class GiftsRepository {
     required String category,
     required double price,
     required String link,
-    required String note,
+    required String hint,
     String? photoUrl,
+    GiftVisibility visibility = GiftVisibility.onPairing,
+    DateTime? unlockAt,
   }) async {
     await _itemsCol(userId).doc(giftId).update({
       'title': title,
       'category': category,
       'price': price,
       'link': link,
-      'note': note,
+      'hint': hint,
       'updatedAt': Timestamp.fromDate(DateTime.now()),
       'photoUrl': photoUrl,
+      'visibility': visibility.value,
+      'unlockAt': unlockAt == null ? null : Timestamp.fromDate(unlockAt),
     });
   }
 
   Future<void> deleteGift({required String userId, required String giftId}) async {
     await _itemsCol(userId).doc(giftId).delete();
+  }
+
+  /// Owner-side early reveal for a `manual`-visibility wish.
+  Future<void> revealNow({required String userId, required String giftId}) async {
+    await _itemsCol(userId).doc(giftId).update({'revealedManually': true});
   }
 
   Future<void> reorder({required String userId, required List<String> giftIdsInOrder}) async {
