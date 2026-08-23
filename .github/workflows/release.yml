@@ -3,12 +3,17 @@ name: Build & Release GiftQuest
 on:
   push:
     branches: [ main ]
+    paths:
+      - 'GQ_kotlin/**'
 
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    defaults:
+      run:
+        working-directory: GQ_kotlin
 
     steps:
       - name: Checkout
@@ -29,7 +34,7 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ hashFiles('**/*.gradle.kts', '**/gradle-wrapper.properties') }}
+          key: gradle-${{ hashFiles('GQ_kotlin/**/*.gradle.kts', 'GQ_kotlin/**/gradle-wrapper.properties') }}
           restore-keys: gradle-
 
       - name: Read version
@@ -54,19 +59,19 @@ jobs:
 
       - name: Decode keystore
         env:
-            KEYSTORE_HEX: ${{ secrets.KEYSTORE_HEX }}
+          KEYSTORE_HEX: ${{ secrets.KEYSTORE_HEX }}
         run: |
-            python3 -c "
-            import binascii, os
-            data = os.environ['KEYSTORE_HEX'].strip()
-            print(f'Hex length received: {len(data)}')
-            print(f'First 10 chars: {data[:10]}')
-            print(f'Last 10 chars: {data[-10:]}')
-            decoded = binascii.unhexlify(data)
-            print(f'Keystore written: {len(decoded)} bytes')
-            with open('app/giftquest-release.jks', 'wb') as f:
-                f.write(decoded)
-            "
+          python3 -c "
+          import binascii, os
+          data = os.environ['KEYSTORE_HEX'].strip()
+          print(f'Hex length received: {len(data)}')
+          print(f'First 10 chars: {data[:10]}')
+          print(f'Last 10 chars: {data[-10:]}')
+          decoded = binascii.unhexlify(data)
+          print(f'Keystore written: {len(decoded)} bytes')
+          with open('app/giftquest-release.jks', 'wb') as f:
+              f.write(decoded)
+          "
 
       - name: Make gradlew executable
         run: chmod +x ./gradlew
@@ -82,7 +87,7 @@ jobs:
         run: |
           APK_PATH=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
           APK_NAME=$(basename "$APK_PATH")
-          echo "path=$APK_PATH" >> $GITHUB_OUTPUT
+          echo "path=GQ_kotlin/$APK_PATH" >> $GITHUB_OUTPUT
           echo "name=$APK_NAME" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
