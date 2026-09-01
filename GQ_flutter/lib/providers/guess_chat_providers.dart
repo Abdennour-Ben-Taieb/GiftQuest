@@ -222,24 +222,29 @@ Do NOT mention anything about the gift. Just welcome the player warmly.
 ''';
 
   String _gamePrompt(Gift item) {
+    // Bucket boundaries aren't currency-converted — this is fuzzy hint
+    // shaping for the AI, not a financial calculation, so the same numeric
+    // cutoffs apply regardless of which currency the price is denominated
+    // in; only the displayed symbol changes.
+    final symbol = currencyLabel(item.currency);
     final String priceRange;
     if (item.price <= 0) {
       priceRange = 'unknown price';
     } else if (item.price < 20) {
-      priceRange = 'under €20 (inexpensive)';
+      priceRange = 'under ${symbol}20 (inexpensive)';
     } else if (item.price < 50) {
-      priceRange = '€20–50 (affordable)';
+      priceRange = '${symbol}20–50 (affordable)';
     } else if (item.price < 100) {
-      priceRange = '€50–100 (moderate)';
+      priceRange = '${symbol}50–100 (moderate)';
     } else if (item.price < 200) {
-      priceRange = '€100–200 (pricey)';
+      priceRange = '${symbol}100–200 (pricey)';
     } else {
-      priceRange = 'over €200 (expensive)';
+      priceRange = 'over ${symbol}200 (expensive)';
     }
 
     final revealText = StringBuffer('Your partner wished for: ${item.title}');
     if (item.price > 0) {
-      revealText.write(', about €${item.price.toStringAsFixed(0)}');
+      revealText.write(', about $symbol${item.price.toStringAsFixed(0)}');
     }
     if (item.link.isNotEmpty) revealText.write(' — find it here: ${item.link}');
 

@@ -114,6 +114,164 @@ class StickerAvatar extends StatelessWidget {
   }
 }
 
+/// Rectangular dashed-border photo picker — used by Add/Edit Wish's photo
+/// field, where the mockup calls for a rectangle rather than the circular
+/// [StickerAvatar] used for profile photos.
+class DashedPhotoBox extends StatelessWidget {
+  const DashedPhotoBox({
+    super.key,
+    required this.onTap,
+    this.image,
+    this.height = 160,
+    this.label = 'add a photo',
+  });
+
+  final VoidCallback onTap;
+  final ImageProvider? image;
+  final double height;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final sticker = _stickerOf(context);
+    final scheme = Theme.of(context).colorScheme;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: SizedBox(
+        height: height,
+        width: double.infinity,
+        child: CustomPaint(
+          painter: _DashedRRectPainter(
+            color: sticker.borderColor,
+            strokeWidth: sticker.borderWidth,
+            radius: sticker.radius,
+          ),
+          child: Container(
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHigh,
+              borderRadius: BorderRadius.circular(sticker.radius),
+              image: image != null
+                  ? DecorationImage(image: image!, fit: BoxFit.cover)
+                  : null,
+            ),
+            alignment: Alignment.center,
+            child: image == null
+                ? Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.add_photo_alternate_outlined,
+                        color: scheme.onSurfaceVariant,
+                        size: 32,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(label, style: TextStyle(color: scheme.onSurfaceVariant)),
+                    ],
+                  )
+                : null,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Big tinted rounded-square icon sticker used by the Reveal screen's
+/// win/lose outcome graphic. [dashed] swaps the solid border for a dashed
+/// one (used for the "lose" state per the mockup).
+class StickerOutcomeIcon extends StatelessWidget {
+  const StickerOutcomeIcon({
+    super.key,
+    required this.icon,
+    required this.tint,
+    this.size = 140,
+    this.dashed = false,
+  });
+
+  final IconData icon;
+  final Color tint;
+  final double size;
+  final bool dashed;
+
+  @override
+  Widget build(BuildContext context) {
+    final sticker = _stickerOf(context);
+
+    final content = Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: tint.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(sticker.radius),
+        border: dashed
+            ? null
+            : Border.all(color: tint, width: sticker.borderWidth),
+      ),
+      child: Icon(icon, color: tint, size: size * 0.42),
+    );
+
+    if (!dashed) return content;
+    return CustomPaint(
+      painter: _DashedRRectPainter(
+        color: tint,
+        strokeWidth: sticker.borderWidth,
+        radius: sticker.radius,
+      ),
+      child: content,
+    );
+  }
+}
+
+class _DashedRRectPainter extends CustomPainter {
+  const _DashedRRectPainter({
+    required this.color,
+    required this.strokeWidth,
+    required this.radius,
+  });
+
+  final Color color;
+  final double strokeWidth;
+  final double radius;
+  static const dashWidth = 6.0;
+  static const gapWidth = 5.0;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rrect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(
+        strokeWidth / 2,
+        strokeWidth / 2,
+        size.width - strokeWidth,
+        size.height - strokeWidth,
+      ),
+      Radius.circular(radius),
+    );
+    final path = Path()..addRRect(rrect);
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth;
+
+    for (final metric in path.computeMetrics()) {
+      var distance = 0.0;
+      while (distance < metric.length) {
+        final next = (distance + dashWidth).clamp(0.0, metric.length);
+        canvas.drawPath(metric.extractPath(distance, next), paint);
+        distance = next + gapWidth;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DashedRRectPainter oldDelegate) {
+    return color != oldDelegate.color ||
+        strokeWidth != oldDelegate.strokeWidth ||
+        radius != oldDelegate.radius;
+  }
+}
+
 enum StickerButtonVariant { primary, secondary, outline }
 
 /// Chunky pill/rounded button with the same sticker-shadow treatment as

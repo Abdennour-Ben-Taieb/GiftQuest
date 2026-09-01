@@ -4,6 +4,42 @@ Running log of the GiftQuest Flutter rebuild (port of `../GiftQuest`, the Kotlin
 
 ---
 
+## Add/Edit Wish — required Category/Price, currency field
+
+Follow-up to the redesign below: Category/Price/Link were tucked behind a collapsed "more details (optional)" section on Add/Edit Wish. Removed that — all three fields are now always visible. Category and Price are now required, with inline `errorText` validation blocking "save wish" if either is missing/invalid (Link stays optional). Also added a `currency` field to the `Gift` model/Firestore schema and a currency dropdown next to Price (`USD`/`EUR`/`TND`/`GBP`, defaulting to TND — a short curated list, not full ISO-4217).
+
+- `lib/models/gift.dart` — new `currency` field (default `'TND'`), `kCurrencyCodes`, and a `currencyLabel()` helper (`$`/`€`/`£`/`DT`, falls back to the raw code otherwise).
+- `lib/repositories/gifts_repository.dart` — `addGift`/`updateGift` both take `currency` now, written alongside `price`.
+- `lib/providers/guess_chat_providers.dart` — the AI prompt's price-bucket text and win-reveal text use `currencyLabel(item.currency)` instead of a hardcoded €. The numeric bucket cutoffs themselves are deliberately *not* currency-converted (no FX rates involved) — this is fuzzy hint-shaping for the AI, not an actual price display, so only the symbol changes.
+- `lib/screens/add_edit_gift_screen.dart` — dropped `_MoreDetailsSection`; Category, Price+currency, and Link are inline fields now. `_validate()` gates `_save()`.
+
+**Legacy data:** wishes saved before this change have `category: ''` / `price: 0.0`. Making the fields hard-required retroactively would mean opening any old wish to tweak something unrelated immediately throws a blocking validation error. Instead, existing wishes missing this data are pre-filled with a fallback on load — category defaults to the existing "🎁 Something Else" catch-all bucket, price defaults to `"0.00"` (0 was already the app's "no price recorded" sentinel, e.g. in the AI prompt's `price<=0` branch) — so validation passes without forcing the user to invent data, while they're still free to correct it. This only applies to *existing* wishes; a brand-new wish still starts with both fields genuinely blank, so the requirement is real going forward.
+
+### Verification
+`flutter analyze` → no issues found. `flutter build apk --debug` → succeeded. No app run/adb/emulator testing, no git commit — per `CLAUDE.md`.
+
+---
+
+## Sunset Pop redesign, part 2 — the 8 screens rebuilt against the new data layer
+
+Finishes the redesign started in "Sunset Pop redesign — theme system + Home/Pairing/AI-chat screens" (below) plus the data-layer rebuild from the prior session (see `journal.txt` for the blow-by-blow). That prior session rewrote the models/repositories/providers (renamed `Gift.note`→`hint`, added `GiftVisibility`/lock state, reworked pairing to a request/accept flow, added guesser-driven `gifted` status, capped guesses at 5) but left every screen still calling the old API surface — none of it compiled. This session rebuilt the screens to match `docs/giftquest_ui_spec.md` + the mockups and closed that gap.
+
+- **`lib/screens/home_screen.dart`** — rewritten from a 2-column grid to a vertical row list. My Wishes rows show one of four states in precedence order: locked (faded, lock icon, "unlocks {date}" or "locked") → hidden (not yet guessed) → guessed by partner → gifted. The partner tab embeds the pairing UI directly (`PairingPanel`) when unpaired — no more pushing a separate route — and shows anonymized "wish #N" rows once paired, revealing the real title once resolved (win or lose). Added empty states and a loading skeleton (3 pulsing placeholder rows) for both tabs, and a small custom 2-item bottom nav bar (Home/Settings) with an underline active-indicator, replacing the old plain `AppBar`.
+- **`lib/screens/add_edit_gift_screen.dart`** — reordered to the mockup's layout: a rectangular dashed-border photo picker (new `DashedPhotoBox` widget, since `StickerAvatar` is circular), TITLE, "HINT FOR THE AI" (renamed from the old free-text "note" field), a GUESSABLE dropdown driving `GiftVisibility` (with an inline date picker for the "on a set date" option), then save/delete. Category/price/link — used by the existing AI-context logic but absent from the mockup — moved into a collapsed "more details (optional)" section instead of being dropped.
+- **`lib/screens/pairing_screen.dart`** — split into `PairingPanel` (the actual UI, no `Scaffold`, so Home can embed it directly) and a thin `PairingScreen` wrapper for the standalone route (reachable from Settings). Replaced the placeholder QR box with a real one via `qr_flutter`. Added the two states the new request/accept pairing flow actually needs to be usable: an incoming-request card (accept/decline) and a "waiting for {partner} to confirm" row with a cancel action. "Scan QR code" opens the new `lib/screens/qr_scan_screen.dart` (`mobile_scanner`), which pops back with the decoded code string.
+- **`lib/screens/guess_chat_screen.dart`** — rewritten: anonymized header label (Home passes down "wish #N"), a "⚡ N/5" pill replacing the old 8-segment progress bar, a static "ask anything — I'll answer, but I won't say it outright" hint pill, and an input row that's just a text field + circular send button (no more separate "I think I know!" button — every message has always been a guess under the hood, so the extra button was cosmetic). Removed the old in-chat game-over banner entirely: on the guess controller's `gameState` flipping to `won`/`lost` (via `ref.listen`), the screen now does a `pushReplacement` to the new Reveal screen instead.
+- **`lib/screens/reveal_screen.dart`** (new) — win/lose outcome screen. Takes just the `(itemId, itemOwnerId)` args and re-derives everything by watching the same `guessChatControllerProvider` family instance, rather than being handed a snapshot of fields — this means it transparently supports both how it gets reached: `pushReplacement` from an in-progress chat (same live controller), or a direct push from Home's "already resolved" partner row (a fresh controller instance whose existing-result branch reconstructs identical state). Radial gradient tint, tinted outcome icon (solid border for a win, dashed for a loss), result card with the gift thumbnail/title/hint. Win path has a "mark as gifted" action (guesser-driven, per the "gifted" model field) that becomes a static confirmation once used; loss path has no primary action at all — brag/share was explicitly ruled out earlier so nothing was added in its place.
+- **`lib/screens/settings_screen.dart`** (new) — dense bordered-row list per the design system's "bordered rows, not cards" convention: account (read-only), notification-preferences/privacy (visual stubs — no backing infra exists), link/unlink partner (confirm dialog before unlinking), log out.
+- **`lib/widgets/sticker.dart`** — added `DashedPhotoBox` and `StickerOutcomeIcon`, both backed by a small private dashed-rounded-rect `CustomPainter` (no new package pulled in for this).
+- **`lib/utils/date_format.dart`** (new) — a single `formatShortDate()` helper ("24 Dec") since the app doesn't otherwise need `intl`.
+
+Login/signup screens and the other existing widgets (`pill_toggle`, `auth_hero`, `google_sign_in_button`) needed no changes — already matched the established style.
+
+### Verification
+`flutter analyze` → no issues found. `flutter build apk --debug` succeeded, confirming `mobile_scanner`/`qr_flutter`'s native Android wiring actually compiles (one non-fatal Gradle deprecation warning about `mobile_scanner` applying its own Kotlin Gradle Plugin — upstream, not actionable here). Per `CLAUDE.md`, the app itself was not run and no adb/device/emulator testing was attempted — that's the user's own next step.
+
+---
+
 ## App icon — exact match to the Kotlin app (Android), not a recreation
 
 The previous approach (`flutter_launcher_icons` rasterizing `icon_flat_purple_bold.png`/`icon_foreground_white_bold.png` into per-density PNGs) was a *recreation* of the Kotlin icon from flat art, which introduced fidelity drift versus the original vector. Replaced that with a direct, byte-for-byte copy of the Kotlin app's actual source for the Android adaptive icon.

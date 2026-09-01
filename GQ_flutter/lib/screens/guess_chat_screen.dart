@@ -1,20 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../config/game_config.dart';
 import '../models/chat_message.dart';
 import '../providers/guess_chat_providers.dart';
-import '../providers/user_providers.dart';
-import '../widgets/sticker.dart';
+import '../utils/date_format.dart';
+import 'reveal_screen.dart';
 
 class GuessChatScreen extends ConsumerStatefulWidget {
   const GuessChatScreen({
     super.key,
     required this.itemId,
     required this.itemOwnerId,
+    this.wishLabel,
   });
 
   final String itemId;
   final String itemOwnerId;
+
+  /// Anonymized label for the header before the wish is won (e.g.
+  /// "wish #3") — Home knows the list position, so it passes this in.
+  final String? wishLabel;
 
   @override
   ConsumerState<GuessChatScreen> createState() => _GuessChatScreenState();
@@ -22,6 +28,7 @@ class GuessChatScreen extends ConsumerStatefulWidget {
 
 class _GuessChatScreenState extends ConsumerState<GuessChatScreen> {
   final _inputController = TextEditingController();
+  bool _navigated = false;
 
   GuessChatArgs get _args =>
       (itemId: widget.itemId, itemOwnerId: widget.itemOwnerId);
@@ -39,35 +46,61 @@ class _GuessChatScreenState extends ConsumerState<GuessChatScreen> {
     _inputController.clear();
   }
 
+  void _goToReveal() {
+    if (_navigated) return;
+    _navigated = true;
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => RevealScreen(args: _args)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    ref.listen(guessChatControllerProvider(_args), (previous, next) {
+      if (next.gameState == GameState.won || next.gameState == GameState.lost) {
+        _goToReveal();
+      }
+    });
+
     final scheme = Theme.of(context).colorScheme;
     final state = ref.watch(guessChatControllerProvider(_args));
-    final partner =
-        ref.watch(userProfileStreamProvider(widget.itemOwnerId)).value;
-    final partnerName = partner?.nickname.isNotEmpty == true
-        ? partner!.nickname
-        : (partner?.name.isNotEmpty == true ? partner!.name : 'their');
+    final label = widget.wishLabel ?? 'this wish';
+    final createdAt = state.item?.createdAt;
 
     return Scaffold(
       appBar: AppBar(
-        title: Text("Guessing $partnerName's gift"),
+        title: Text(label),
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(28),
+          preferredSize: const Size.fromHeight(24),
           child: Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: _GuessProgress(guessCount: state.guessCount),
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Text(
+              createdAt != null
+                  ? 'hidden since ${formatShortDate(createdAt)}'
+                  : ' ',
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+            ),
           ),
         ),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: Center(child: _GuessCountPill(guessCount: state.guessCount)),
+          ),
+        ],
       ),
       body: Column(
         children: [
+          if (state.messages.isNotEmpty || !state.isLoading)
+            const _SystemHintPill(),
           Expanded(
             child: state.messages.isEmpty && state.isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : ListView.builder(
                     reverse: true,
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                     itemCount:
                         state.messages.length + (state.isLoading ? 1 : 0),
                     itemBuilder: (context, index) {
@@ -89,19 +122,7 @@ class _GuessChatScreenState extends ConsumerState<GuessChatScreen> {
                     },
                   ),
           ),
-          if (state.gameState == GameState.won ||
-              state.gameState == GameState.givenUp)
-            _GameOverBanner(won: state.gameState == GameState.won, guessCount: state.guessCount)
-          else if (state.gameState == GameState.alreadyPlayed)
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(
-                'You already played this one — ${state.guessCount} guesses.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: scheme.onSurfaceVariant),
-              ),
-            )
-          else
+          if (state.gameState == GameState.playing)
             SafeArea(
               top: false,
               child: Padding(
@@ -116,16 +137,15 @@ class _GuessChatScreenState extends ConsumerState<GuessChatScreen> {
                         minLines: 1,
                         maxLines: 3,
                         decoration: const InputDecoration(
-                          hintText: 'Ask a question...',
+                          hintText: 'type your guess...',
                         ),
                         onSubmitted: (_) => _submit(),
                       ),
                     ),
                     const SizedBox(width: 12),
-                    StickerButton(
-                      label: 'I think I know!',
-                      onPressed: state.isLoading ? null : _submit,
-                      expand: false,
+                    _SendButton(
+                      enabled: !state.isLoading,
+                      onPressed: _submit,
                     ),
                   ],
                 ),
@@ -137,40 +157,83 @@ class _GuessChatScreenState extends ConsumerState<GuessChatScreen> {
   }
 }
 
-class _GuessProgress extends StatelessWidget {
-  const _GuessProgress({required this.guessCount});
+class _GuessCountPill extends StatelessWidget {
+  const _GuessCountPill({required this.guessCount});
 
   final int guessCount;
-
-  static const _cap = 8;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final filled = guessCount.clamp(0, _cap);
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        for (var i = 0; i < _cap; i++)
-          Container(
-            margin: const EdgeInsets.symmetric(horizontal: 2),
-            width: 18,
-            height: 6,
-            decoration: BoxDecoration(
-              color: i < filled ? scheme.secondary : scheme.surfaceContainerHigh,
-              borderRadius: BorderRadius.circular(3),
-            ),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        '⚡ $guessCount/${GameConfig.maxGuesses}',
+        style: Theme.of(
+          context,
+        ).textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w600),
+      ),
+    );
+  }
+}
+
+class _SystemHintPill extends StatelessWidget {
+  const _SystemHintPill();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainer,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: scheme.outlineVariant),
+        ),
+        child: Text(
+          "ask anything — I'll answer, but I won't say it outright",
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: scheme.onSurfaceVariant,
+            fontStyle: FontStyle.italic,
           ),
-        if (guessCount > _cap) ...[
-          const SizedBox(width: 6),
-          Text(
-            '+${guessCount - _cap}',
-            style: Theme.of(
-              context,
-            ).textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant),
+        ),
+      ),
+    );
+  }
+}
+
+class _SendButton extends StatelessWidget {
+  const _SendButton({required this.onPressed, required this.enabled});
+
+  final VoidCallback onPressed;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return AnimatedOpacity(
+      opacity: enabled ? 1 : 0.5,
+      duration: const Duration(milliseconds: 150),
+      child: Material(
+        color: scheme.primary,
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: enabled ? onPressed : null,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Icon(Icons.send_rounded, color: scheme.onPrimary, size: 20),
           ),
-        ],
-      ],
+        ),
+      ),
     );
   }
 }
@@ -239,53 +302,6 @@ class _ThinkingIndicator extends StatelessWidget {
           ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
         ),
       ],
-    );
-  }
-}
-
-class _GameOverBanner extends StatelessWidget {
-  const _GameOverBanner({required this.won, required this.guessCount});
-
-  final bool won;
-  final int guessCount;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      color: won ? scheme.secondary : scheme.errorContainer,
-      child: SafeArea(
-        top: false,
-        child: Column(
-          children: [
-            Text(
-              won ? '🎉 You got it!' : '😅 Better luck next time!',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: won ? scheme.onSecondary : scheme.onErrorContainer,
-                    fontWeight: FontWeight.w700,
-                  ),
-            ),
-            if (won) ...[
-              const SizedBox(height: 4),
-              Text(
-                '$guessCount guesses',
-                style: TextStyle(
-                  color: won ? scheme.onSecondary : scheme.onErrorContainer,
-                ),
-              ),
-            ],
-            const SizedBox(height: 12),
-            StickerButton(
-              label: 'Back to gifts',
-              onPressed: () => Navigator.of(context).pop(),
-              expand: false,
-              variant: StickerButtonVariant.outline,
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

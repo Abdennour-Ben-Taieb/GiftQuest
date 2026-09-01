@@ -12,6 +12,7 @@ google-services.json
 *.jks
 *.keystore
 giftquest-admin.html
+google-services.json
 
 # IDE
 /.idea/caches

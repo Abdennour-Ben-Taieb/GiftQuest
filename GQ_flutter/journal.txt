@@ -4,6 +4,174 @@ docs/GiftQuest_UI_Mockups.pdf" task. Newest entries at the bottom... actually ne
 top so it's readable without scrolling. Keep entries brief.
 
 ===============================================================================
+2026-09-01 — Session 3: Add/Edit Wish follow-up (required fields, currency)
+===============================================================================
+
+Follow-up request on top of session 2's finished screens: remove the "more
+details (optional)" collapsed section on Add/Edit Wish (Category/Price/Link
+always visible), make Category+Price required with inline validation, add a
+Gift.currency field + a currency dropdown next to Price, and use currency
+wherever price is displayed.
+
+- lib/models/gift.dart: added `currency` (String, default 'TND'),
+  `kCurrencyCodes` (`['USD','EUR','TND','GBP']` — short curated list per the
+  request, not full ISO-4217), and `currencyLabel(code)` (symbol/abbreviation
+  helper: $/€/£/DT, falls back to the raw code for anything else). Threaded
+  through fromFirestore/toFirestore/copyWith. Firestore field name is
+  literally `currency`.
+- lib/repositories/gifts_repository.dart: addGift/updateGift both gained a
+  `currency` param (default 'TND'), written alongside `price`.
+- lib/providers/guess_chat_providers.dart: `_gamePrompt`'s price-bucket text
+  and the win-reveal text now use `currencyLabel(item.currency)` instead of
+  a hardcoded €. NOTE: the numeric bucket cutoffs themselves (20/50/100/200)
+  are NOT currency-converted — this is fuzzy hint-shaping for the AI, not a
+  financial calculation, so the same cutoffs apply regardless of currency,
+  only the printed symbol changes. Flagging this since a real FX-aware
+  version would need live rates, which felt like overkill for what's a soft
+  hint bucket, not a price display.
+- lib/screens/add_edit_gift_screen.dart: removed `_MoreDetailsSection`
+  entirely — Category, Price (+ currency dropdown to its right, 96px wide,
+  defaults to 'TND'), and Link are now always visible, in that order, same
+  position as before. Link stays optional per the request. Category and
+  Price now block save via `_validate()`, called from `_save()`: sets
+  `_categoryError`/`_priceError` (shown as `errorText` on each field) if
+  category is unset or price doesn't parse to a number >= 0; save is
+  aborted if either fails. Price validation deliberately accepts 0 — that's
+  already how "no price" is represented everywhere else in the app (the AI
+  prompt's `price<=0` branch predates this change), so this isn't a new
+  loophole, just consistent with existing semantics.
+
+## Legacy-data fallback (flagging per the explicit ask, not guessing silently)
+Existing wishes saved before Category/Price were required will have
+category `''` and/or price `0.0`. Making these hard-required retroactively
+would mean opening ANY old wish to edit something unrelated (e.g. just the
+title) immediately shows a blocking validation error the user didn't ask
+for. Chose to pre-fill sensible defaults on load instead, so validation
+passes automatically unless the user explicitly clears the field:
+  - Category: if the stored value isn't one of `kGiftCategories`, the
+    dropdown pre-selects "🎁 Something Else" (the existing catch-all
+    bucket) rather than staying unset.
+  - Price: if stored price is 0 (or missing), the field pre-fills "0.00"
+    rather than staying blank.
+This ONLY applies when editing an existing wish (`widget.existing != null`).
+Brand-new wishes still start with both fields genuinely blank/unset, so
+adding a wish still forces a conscious category/price choice — the
+required-ness is real for anything created going forward, it just doesn't
+retroactively punish data that predates the requirement. If a stricter
+"force every legacy wish to be re-categorized with a real price" behavior
+is actually wanted, that's a different, deliberate call the user should
+make explicitly — didn't guess that further than this.
+
+## Verification
+- `flutter analyze` → no issues found.
+- `flutter build apk --debug` → succeeded again after these changes.
+- No app run/adb/emulator, no git commit/push — same constraints as before.
+
+===============================================================================
+2026-09-01 — Session 2: screens rebuilt, task DONE (analyze clean, apk builds)
+===============================================================================
+
+Picked up exactly where session 1 left off (data layer was already done, see
+entry below). Rewrote/added all remaining screens per the "what's NOT done
+yet" list from the previous entry, in the same order:
+
+- lib/widgets/sticker.dart: added DashedPhotoBox (rectangular dashed-border
+  photo picker, for Add/Edit Wish) and StickerOutcomeIcon (tinted rounded-
+  square icon sticker, solid or dashed border, for Reveal win/lose). Backed
+  by a small private _DashedRRectPainter (CustomPainter tracing a dashed
+  RRect outline) — no new dependency for this.
+- lib/utils/date_format.dart (new): formatShortDate() → "24 Dec", no intl
+  dependency, only form the app needs.
+- lib/screens/home_screen.dart: full rewrite. Vertical list (not grid),
+  "hey, [name]" header + avatar, PillToggle, My Wishes rows (locked/hidden/
+  guessed-by/gifted precedence exactly as spec'd, thumbnail + status icon),
+  Partner tab shows PairingPanel inline when unpaired (no navigation) or
+  anonymized "wish #N" rows when paired (locked/playable/resolved states,
+  title reveals on both win AND loss once resolved — simplest+consistent
+  per the open call in the last entry). Empty states (dashed gift-box icon,
+  "add first wish" sized-to-content button) and a loading skeleton (3 pulsing
+  rows + "• • •") for both tabs. New custom 2-item bottom nav (Home/Settings,
+  underline-active-indicator) replacing the old AppBar.
+- lib/screens/add_edit_gift_screen.dart: reordered to match mockup — back+
+  title header (from Scaffold AppBar) → DashedPhotoBox → TITLE field → HINT
+  FOR THE AI (renamed from note) + "only the AI sees this" caption →
+  GUESSABLE dropdown (GiftVisibility: onPairing/onDate w/ inline date picker/
+  manual) → save wish (full width) → delete wish (edit mode, outline/
+  destructive, full width). Category/price/link kept as a collapsed "more
+  details (optional)" section rather than dropped.
+- lib/screens/pairing_screen.dart: reworked into PairingPanel (the actual UI,
+  no Scaffold — embedded directly in Home's partner tab) + a thin
+  PairingScreen wrapper (Scaffold + PairingPanel, reachable from Settings).
+  Real QR via qr_flutter's QrImageView. Added incoming-request card (accept/
+  decline) and waiting-for-confirmation row (status dot + cancel), both
+  needed for the new request/accept pairing flow to actually be usable end
+  to end. "Scan QR code" pushes the new qr_scan_screen.dart.
+- lib/screens/qr_scan_screen.dart (new): MobileScanner wrapper, pops with the
+  decoded string on first successful scan; errorBuilder shows a plain
+  message instead of crashing on camera-permission failure (can't test this
+  path here per the testing boundary, written defensively).
+- lib/screens/guess_chat_screen.dart: full rewrite. Header = anonymized
+  wishLabel (Home passes "wish #N") + "hidden since {date}" subtitle +
+  "⚡ N/5" pill (replaces the old 8-segment bar). Static lighter "ask
+  anything..." hint pill above the message list. Input row: "type your
+  guess..." + circular send button (paper-plane icon), replacing "I think I
+  know!". On gameState flipping to won/lost (ref.listen, _navigated guard),
+  pushReplacement → RevealScreen. Removed the old game-over banner and
+  alreadyPlayed branch entirely — GuessChatController already resolves an
+  existing result straight to won/lost state, so the same ref.listen catches
+  that path too with no special-casing needed.
+- lib/screens/reveal_screen.dart (new): takes just `GuessChatArgs args` and
+  re-derives everything (item/won/guessCount/gifted) by watching
+  guessChatControllerProvider(args) — no snapshot params passed in. This
+  covers both entry paths for free: pushReplacement from chat keeps the same
+  live controller instance; a direct push from Home's "already resolved"
+  partner row spins up a fresh instance whose _load() re-derives the same
+  state from the saved GameResult. Radial gradient tint (mint/error at low
+  alpha), StickerOutcomeIcon, flavor text referencing guessCount, result
+  card (thumbnail + THE WISH/IT WAS + title + hint first line). Win: "mark
+  as gifted" button → static "🎁 marked as gifted" once done. Lose: no
+  primary action at all (confirmed dropped). "back to home" always does
+  pushAndRemoveUntil to a fresh HomeScreen, regardless of how Reveal was
+  reached, so the nav stack shape doesn't matter.
+- lib/screens/settings_screen.dart (new): dense bordered-row list (CDS
+  convention) — Account (read-only), Notification prefs + Privacy (visual
+  stubs, no backing infra), Link/Unlink partner (confirm dialog on unlink),
+  Log out.
+
+Left untouched, confirmed still fine: login_screen.dart, signup_screen.dart,
+lib/widgets/{pill_toggle,auth_hero,google_sign_in_button}.dart, the whole
+data layer from session 1 (models/providers/repositories unchanged).
+
+## Judgment calls made (nothing user-blocking, all consistent with the
+   "your call" latitude the previous entry explicitly left open)
+- Partner row title reveals on loss too, not just on win (previous entry
+  flagged this as an open call and recommended this exact resolution).
+- Account-menu bottom sheet (avatar tap) now only has "Sign out" — "Manage
+  pairing" was removed since pairing lives inline in Home's partner tab now
+  and Settings also has a Link/Unlink entry; keeping a third entry point
+  would've been redundant.
+- RevealScreen takes only `args` (itemId/itemOwnerId), not a snapshot of
+  won/guessCount/item/etc as the previous entry's plan suggested — it reads
+  live state off the same family-keyed controller instead. Simpler, avoids
+  duplicated state, and the "opened directly from Home for an already-
+  resolved wish" path falls out for free instead of needing separate
+  handling.
+
+## Verification
+- `flutter analyze` → no issues found (0 warnings/infos after cleanup).
+- `flutter build apk --debug` → succeeded (build\app\outputs\flutter-apk\
+  app-debug.apk), confirming mobile_scanner/qr_flutter's native Android
+  wiring actually compiles, not just the Dart. One non-fatal warning from
+  Gradle (mobile_scanner applies its own Kotlin Gradle Plugin, a known
+  upstream deprecation notice, not an error) — nothing to act on here.
+- Did NOT run the app, use adb, or touch an emulator/device — per CLAUDE.md
+  and the original task prompt.
+- Did NOT git add/commit/push anything — everything left as uncommitted
+  local changes for the user to review.
+
+Task is complete pending the user's own manual device testing.
+
+===============================================================================
 2026-08-24 — Session 1, checkpoint (usage limit hit mid-task, NOT done yet)
 ===============================================================================
 

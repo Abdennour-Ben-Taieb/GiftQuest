@@ -1,5 +1,26 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+/// Short, curated list rather than a full ISO-4217 list — this is a
+/// two-person household app, not a payments product.
+const kCurrencyCodes = <String>['USD', 'EUR', 'TND', 'GBP'];
+
+/// Display symbol/abbreviation for a currency code. Falls back to the code
+/// itself for anything outside [kCurrencyCodes] (e.g. old data).
+String currencyLabel(String code) {
+  switch (code) {
+    case 'USD':
+      return '\$';
+    case 'EUR':
+      return '€';
+    case 'GBP':
+      return '£';
+    case 'TND':
+      return 'DT';
+    default:
+      return code;
+  }
+}
+
 /// When a wish becomes guessable by the linked partner.
 enum GiftVisibility {
   /// Guessable as soon as the two accounts are paired (default).
@@ -30,6 +51,9 @@ class Gift {
   final String title;
   final String category;
   final double price;
+
+  /// ISO code, e.g. "TND" — see [kCurrencyCodes].
+  final String currency;
   final String link;
 
   /// The only evidence the AI is allowed to draw on when giving hints —
@@ -49,6 +73,7 @@ class Gift {
     required this.title,
     required this.category,
     required this.price,
+    this.currency = 'TND',
     required this.link,
     required this.hint,
     required this.createdAt,
@@ -83,6 +108,7 @@ class Gift {
       title: data['title'] as String? ?? '',
       category: data['category'] as String? ?? '',
       price: (data['price'] as num?)?.toDouble() ?? 0.0,
+      currency: data['currency'] as String? ?? 'TND',
       link: data['link'] as String? ?? '',
       hint: data['hint'] as String? ?? data['note'] as String? ?? '',
       createdAt: _parseTimestamp(data['createdAtMillis'] ?? data['createdAt']),
@@ -105,6 +131,7 @@ class Gift {
       'title': title,
       'category': category,
       'price': price,
+      'currency': currency,
       'link': link,
       'hint': hint,
       'createdAt': Timestamp.fromDate(createdAt),
@@ -121,6 +148,7 @@ class Gift {
     String? title,
     String? category,
     double? price,
+    String? currency,
     String? link,
     String? hint,
     double? position,
@@ -134,6 +162,7 @@ class Gift {
       title: title ?? this.title,
       category: category ?? this.category,
       price: price ?? this.price,
+      currency: currency ?? this.currency,
       link: link ?? this.link,
       hint: hint ?? this.hint,
       createdAt: createdAt,
